@@ -395,8 +395,10 @@ final class HeartRatePipView: UIView {
         numberLabel.font = .systemFont(ofSize: CGFloat(s.bpmNumberSize) * 2.5 * scale, weight: .bold)
         bpmLabel.font = .systemFont(ofSize: CGFloat(s.bpmLabelSize) * 2.0 * scale, weight: .medium)
 
-        let numberSize = numberLabel.text?.size(withAttributes: [.font: numberLabel.font]) ?? .zero
-        let labelSize = bpmLabel.text?.size(withAttributes: [.font: bpmLabel.font]) ?? .zero
+        let numberFont = numberLabel.font ?? .systemFont(ofSize: 14)
+        let labelFont = bpmLabel.font ?? .systemFont(ofSize: 12)
+        let numberSize = numberLabel.text?.size(withAttributes: [.font: numberFont]) ?? .zero
+        let labelSize = bpmLabel.text?.size(withAttributes: [.font: labelFont]) ?? .zero
         let spacing: CGFloat = 8 * scale
         // 钳制在窗口宽度内，超出时 adjustsFontSizeToFitWidth 会自动缩小字号
         let maxTextWidth = boundsW - 16

@@ -322,8 +322,8 @@ struct HeartRateCurveShape: Shape {
                 // 无数据点画在最底
                 ratio = 0
             } else {
-                ratio = CGFloat((Double(v) - minValue) / Double(maxValue - minValue))
-                ratio = min(max(ratio, 0.02), 1.0)
+                let r = CGFloat((Double(v) - minValue) / Double(maxValue - minValue))
+                ratio = min(max(r, 0.02), 1.0)
             }
             let y = topInset + usableHeight * (1 - CGFloat(ratio) * 0.92)
             return CGPoint(x: x, y: y)
