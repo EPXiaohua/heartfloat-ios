@@ -15,11 +15,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: List project structure
-        run: |
-          ls -la
-          ls -la HeartFloat/ || true
-
       - name: Build unsigned archive
         run: |
           xcodebuild archive \
@@ -34,22 +29,13 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             VALIDATE_PRODUCT=NO \
-            ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
-            COPY_PHASE_STRIP=NO \
+            ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO \
             ENABLE_BITCODE=NO \
             SKIP_INSTALL=NO \
-            OTHER_CFLAGS="-fembed-bitcode-marker" \
-            OTHER_LDFLAGS="" \
+            DEAD_CODE_STRIPPING=YES \
             | xcpretty
 
-      - name: Show archive contents (before fix)
-        run: |
-          echo "=== Archive structure ==="
-          ls -laR build/HeartFloat.xcarchive/ 2>/dev/null | head -40 || echo "Archive not found!"
-          echo -e "\n=== App bundle BEFORE Swift libs ==="
-          ls -laR build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app/ 2>/dev/null | head -30
-
-      - name: Embed Swift standard libraries
+      - name: Verify app bundle
         run: |
           APP_PATH="build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app"
           BINARY="$APP_PATH/HeartFloat"
@@ -59,158 +45,19 @@ jobs:
             exit 1
           fi
 
-          echo "=== Step 1: Detect linked Swift libraries via otool ==="
-          NEEDED_LIBS=$(otool -L "$BINARY" | grep -oE 'libswift[a-zA-Z0-9_]+\.dylib' | sort -u)
-          LIB_COUNT=$(echo "$NEEDED_LIBS" | grep -c .)
-          echo "Binary needs $LIB_COUNT Swift libraries:"
-          echo "$NEEDED_LIBS"
-          echo ""
+          echo "=== App bundle contents ==="
+          ls -la "$APP_PATH/"
 
-          echo "=== Step 2: Locate active Xcode and its Swift libraries ==="
-          XCODE_PATH="$(xcode-select -p)"
-          ACTIVE_XCODE_APP="$(dirname "$(dirname "$(dirname "$XCODE_PATH")")")"
-          echo "Active Xcode developer dir : $XCODE_PATH"
-          echo "Active Xcode app           : $ACTIVE_XCODE_APP"
-          xcodebuild -version 2>&1 | head -2
-
-          FOUND_BASE_DIR=""
-
-          echo ""
-          echo "--- Strategy A: Toolchain path patterns ---"
-          TC_PATTERNS=(
-            "$XCODE_PATH/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/iphoneos"
-            "$XCODE_PATH/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.9/iphoneos"
-            "$XCODE_PATH/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.10/iphoneos"
-            "$XCODE_PATH/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphoneos"
-          )
-          for PATTERN in "${TC_PATTERNS[@]}"; do
-            if [ -d "$PATTERN" ]; then
-              COUNT=$(ls -1 "$PATTERN"/libswiftCore.dylib 2>/dev/null | wc -l | tr -d ' ')
-              if [ "$COUNT" -gt 0 ]; then
-                TOTAL=$(ls -1 "$PATTERN"/libswift*.dylib 2>/dev/null | wc -l | tr -d ' ')
-                echo "  ✅ $PATTERN → $TOTAL .dylib files (libswiftCore found!)"
-                FOUND_BASE_DIR="$PATTERN"
-                break
-              else
-                echo "  📂 $PATTERN → exists but no libswiftCore.dylib"
-              fi
-            fi
-          done
-
-          if [ -z "$FOUND_BASE_DIR" ]; then
-            echo ""
-            echo "--- Strategy B: Find in active Xcode only ---"
-            CANDIDATE_DIRS=$(find "$ACTIVE_XCODE_APP" -path "*iphoneos*" -name "libswiftCore.dylib" -type f 2>/dev/null)
-            if [ -n "$CANDIDATE_DIRS" ]; then
-              echo "  Found candidates:"
-              echo "$CANDIDATE_DIRS" | while read -r CAND; do
-                DIR_NAME="$(dirname "$CAND")"
-                LIB_COUNT_IN_DIR=$(ls -1 "$DIR_NAME"/libswift*.dylib 2>/dev/null | wc -l | tr -d ' ')
-                echo "    $DIR_NAME ($LIB_COUNT_IN_DIR dylibs)"
-              done
-              BEST_CANDIDATE=$(echo "$CANDIDATE_DIRS" | head -1)
-              FOUND_BASE_DIR="$(dirname "$BEST_CANDIDATE")"
-              echo "  ✅ Selected: $FOUND_BASE_DIR"
-            fi
-          fi
-
-          if [ -z "$FOUND_BASE_DIR" ]; then
-            echo ""
-            echo "--- Strategy C: Broad find, filter out simulator/tvos/watchos ---"
-            CANDIDATE_DIRS=$(find /Applications/Xcode*.app \
-              -path "*iphoneos*" \
-              -not -path "*simulator*" \
-              -not -path "*appletv*" \
-              -not -path "*watchos*" \
-              -name "libswiftCore.dylib" -type f 2>/dev/null)
-
-            if [ -z "$CANDIDATE_DIRS" ]; then
-              echo "::error::Cannot locate any iPhoneOS Swift dylibs!"
-              echo "All Swift dylibs found on system (for debugging):"
-              find /Applications/Xcode*.app -name "libswiftCore.dylib" -type f 2>/dev/null | head -10
-              exit 1
-            fi
-
-            echo "  Candidates (non-simulator):"
-            echo "$CANDIDATE_DIRS"
-
-            BEST_CANDIDATE=$(echo "$CANDIDATE_DIRS" | grep "$ACTIVE_XCODE_APP" | head -1)
-            if [ -z "$BEST_CANDIDATE" ]; then
-              BEST_CANDIDATE=$(echo "$CANDIDATE_DIRS" | head -1)
-            fi
-            FOUND_BASE_DIR="$(dirname "$BEST_CANDIDATE")"
-            echo "  ✅ Selected: $FOUND_BASE_DIR"
-          fi
-
-          echo ""
-          echo "=== Using Swift lib source dir: $FOUND_BASE_DIR ==="
-          ls -lh "$FOUND_BASE_DIR"/libswift*.dylib 2>/dev/null | head -40
-          echo ""
-
-          mkdir -p "$APP_PATH/Frameworks"
-
-          EMBEDDED_COUNT=0
-          MISSING_LIBS=()
-
-          while IFS= read -r LIB; do
-            [ -z "$LIB" ] && continue
-            SRC="$FOUND_BASE_DIR/$LIB"
-            if [ -f "$SRC" ]; then
-              cp "$SRC" "$APP_PATH/Frameworks/"
-              chmod 755 "$APP_PATH/Frameworks/$LIB"
-              SIZE=$(du -h "$APP_PATH/Frameworks/$LIB" | cut -f1)
-              echo "  ✅ Embedded: $LIB ($SIZE)"
-              EMBEDDED_COUNT=$((EMBEDDED_COUNT + 1))
-            else
-              echo "  ⚠️ Not found: $LIB"
-              MISSING_LIBS+=("$LIB")
-            fi
-          done <<< "$NEEDED_LIBS"
-
-          echo ""
-          echo "=== Results ==="
-          echo "  Embedded: $EMBEDDED_COUNT / $LIB_COUNT libraries"
-
-          if [ ${#MISSING_LIBS[@]} -gt 0 ]; then
-            echo "  Missing (${#MISSING_LIBS[@]}):"
-            for MLIB in "${MISSING_LIBS[@]}"; do
-              echo "    - $MLIB"
-            done
-          fi
-
-          echo ""
-          echo "=== Frameworks directory contents ==="
-          ls -lh "$APP_PATH/Frameworks/"
-
-          if [ "$EMBEDDED_COUNT" -eq 0 ]; then
-            echo "::error::Failed to embed ANY Swift libraries. IPA will be incomplete."
-            exit 1
-          fi
-
-      - name: Show archive contents (after fix)
-        run: |
-          echo "=== App bundle AFTER Swift libs ==="
-          ls -laR build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app/
-          echo -e "\n=== Total app bundle size ==="
-          du -sh build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app/
-
-      - name: Verify app binary and frameworks
-        run: |
-          APP_PATH="build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app/HeartFloat"
-          BINARY_SIZE=$(stat -f%z "$APP_PATH")
+          BINARY_SIZE=$(stat -f%z "$BINARY")
           echo "App binary size: $BINARY_SIZE bytes"
 
-          FRAMEWORKS_DIR="build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app/Frameworks"
-          LIB_COUNT=$(ls -1 "$FRAMEWORKS_DIR"/*.dylib 2>/dev/null | wc -l | tr -d ' ')
-          echo "Embedded dylibs count: $LIB_COUNT"
-
-          TOTAL_APP_SIZE=$(du -sk build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app/ | cut -f1)
-          echo "Total app bundle size: ${TOTAL_APP_SIZE}K"
-
-          if [ "$TOTAL_APP_SIZE" -lt 500 ]; then
-            echo "::error::App bundle too small (${TOTAL_APP_SIZE}K), likely missing critical content."
+          if [ "$BINARY_SIZE" -lt 10000 ]; then
+            echo "::error::App binary too small ($BINARY_SIZE bytes)"
             exit 1
           fi
+
+          echo "=== App bundle size ==="
+          du -sh "$APP_PATH"
 
       - name: Package IPA manually
         run: |
@@ -218,12 +65,6 @@ jobs:
           mkdir -p build/ipa/Payload
 
           APP_SRC="build/HeartFloat.xcarchive/Products/Applications/HeartFloat.app"
-          if [ ! -d "$APP_SRC" ]; then
-            echo "::error::HeartFloat.app not found in archive"
-            exit 1
-          fi
-
-          echo "Copying app bundle with all frameworks..."
           cp -R "$APP_SRC" build/ipa/Payload/
 
           echo "Creating IPA..."
@@ -239,10 +80,8 @@ jobs:
           mv build/HeartFloat-unsigned.ipa build/HeartFloat.ipa
           echo "Final IPA:"
           ls -lh build/HeartFloat.ipa
-          echo -e "\n=== Full IPA contents ==="
+          echo -e "\n=== IPA contents ==="
           unzip -l build/HeartFloat.ipa
-          echo -e "\n=== IPA summary ==="
-          unzip -l build/HeartFloat.ipa | tail -3
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4

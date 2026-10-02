@@ -1,33 +1,38 @@
 import Foundation
-import SwiftUI
 import UIKit
 import AVFoundation
 
-class HeartRateVideoRenderer {
+/// 生成画中画载体视频（纯黑，无内容）。
+/// 参考 CaiWanFeng/PiP 方案：视频仅作为画中画的"载体"，
+/// 真正的心率 UI 由 HeartRatePipView 叠加渲染到画中画窗口上，
+/// 因此视频本身不需要包含任何文字/颜色内容，也就不存在颜色空间问题。
+final class HeartRateVideoRenderer {
 
     static let shared = HeartRateVideoRenderer()
 
     private let videoSize = CGSize(width: 240, height: 160)
     private let frameRate: Int32 = 15
-    private var currentURL: URL?
-    private var isGenerating = false
+    private var cachedURL: URL?
 
-    func generateVideo(heartRate: Int, settings: SettingsManager) -> URL? {
-        if isGenerating { return currentURL }
+    /// 生成（或复用缓存的）纯黑循环视频
+    func generateBlackVideo() -> URL? {
+        if let url = cachedURL, FileManager.default.fileExists(atPath: url.path) {
+            return url
+        }
 
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("pip_hr_\(heartRate)_\(Date().timeIntervalSince1970).mp4")
+            .appendingPathComponent("pip_carrier_black.mp4")
 
-        isGenerating = true
-        defer { isGenerating = false }
+        // 已存在旧文件则先删除
+        try? FileManager.default.removeItem(at: url)
 
         let settingsDict: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Int(videoSize.width),
             AVVideoHeightKey: Int(videoSize.height),
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 500000,
-                AVVideoMaxKeyFrameIntervalKey: frameRate * 5
+                AVVideoAverageBitRateKey: 100000,
+                AVVideoMaxKeyFrameIntervalKey: frameRate
             ]
         ]
 
@@ -49,12 +54,12 @@ class HeartRateVideoRenderer {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
-        let totalFrames = frameRate * 2
+        let totalFrames = frameRate * 2 // 2 秒循环视频
         for frameIndex in 0..<totalFrames {
             while !input.isReadyForMoreMediaData {
                 Thread.sleep(forTimeInterval: 0.005)
             }
-            guard let buffer = createPixelBuffer(heartRate: heartRate, settings: settings) else { continue }
+            guard let buffer = createBlackPixelBuffer() else { continue }
             let time = CMTime(value: Int64(frameIndex), timescale: frameRate)
             adaptor.append(buffer, withPresentationTime: time)
         }
@@ -66,26 +71,20 @@ class HeartRateVideoRenderer {
         sem.wait()
 
         if writer.status == .completed {
-            cleanupOldFiles(keep: url)
-            currentURL = url
+            cachedURL = url
             return url
         }
+        try? FileManager.default.removeItem(at: url)
         return nil
     }
 
-    private func createPixelBuffer(heartRate: Int, settings: SettingsManager) -> CVPixelBuffer? {
-        let image = renderHeartRateImage(heartRate: heartRate, settings: settings)
-        guard let cgImage = image.cgImage else { return nil }
-
-        let width = cgImage.width
-        let height = cgImage.height
+    private func createBlackPixelBuffer() -> CVPixelBuffer? {
+        let width = Int(videoSize.width)
+        let height = Int(videoSize.height)
 
         let attrs: [String: Any] = [
             kCVPixelBufferCGImageCompatibilityKey as String: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
-            kCVPixelBufferWidthKey as String: width,
-            kCVPixelBufferHeightKey as String: height,
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
         ]
 
         var pixelBuffer: CVPixelBuffer?
@@ -105,83 +104,10 @@ class HeartRateVideoRenderer {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // 纯黑填充 —— 黑色在任何颜色空间下都是黑色，杜绝色偏
+        context.setFillColor(UIColor.black.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
         return buffer
-    }
-
-    private func renderHeartRateImage(heartRate: Int, settings: SettingsManager) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: videoSize)
-        return renderer.image { ctx in
-            let w = videoSize.width
-            let h = videoSize.height
-            let cornerRadius: CGFloat = 28
-            let bgOpacity = CGFloat(settings.backgroundOpacity) / 100.0
-
-            UIColor.black.setFill()
-            ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-
-            UIColor.black.withAlphaComponent(bgOpacity).setFill()
-            let bgPath = UIBezierPath(roundedRect: CGRect(x: 4, y: 4, width: w - 8, height: h - 8), cornerRadius: cornerRadius)
-            bgPath.fill()
-
-            let numberFont = UIFont.systemFont(ofSize: CGFloat(settings.bpmNumberSize) * 2.5, weight: .bold)
-            let labelFont = UIFont.systemFont(ofSize: CGFloat(settings.bpmLabelSize) * 2, weight: .medium)
-            let numberColor = UIColor(Color(hex: settings.bpmNumberColorHex))
-            let labelColor = UIColor(Color(hex: settings.bpmLabelColorHex))
-
-            let hrText = heartRate > 0 ? "\(heartRate)" : "--"
-            let labelText = "BPM"
-
-            let attrNumber: [NSAttributedString.Key: Any] = [
-                .font: numberFont,
-                .foregroundColor: numberColor
-            ]
-            let attrLabel: [NSAttributedString.Key: Any] = [
-                .font: labelFont,
-                .foregroundColor: labelColor
-            ]
-
-            let numberSize = (hrText as NSString).size(withAttributes: attrNumber)
-            let labelSize = (labelText as NSString).size(withAttributes: attrLabel)
-            let spacing: CGFloat = 8
-            let totalWidth: CGFloat
-            switch settings.bpmPosition {
-            case 0, 1:
-                totalWidth = max(numberSize.width, labelSize.width)
-            default:
-                totalWidth = numberSize.width + spacing + labelSize.width
-            }
-
-            let centerX = w / 2
-            let centerY = h / 2
-
-            switch settings.bpmPosition {
-            case 0:
-                let labelY = centerY - numberSize.height / 2 - labelSize.height - 4
-                (labelText as NSString).draw(at: CGPoint(x: centerX - labelSize.width / 2, y: labelY), withAttributes: attrLabel)
-                (hrText as NSString).draw(at: CGPoint(x: centerX - numberSize.width / 2, y: centerY - numberSize.height / 2), withAttributes: attrNumber)
-            case 1:
-                (hrText as NSString).draw(at: CGPoint(x: centerX - numberSize.width / 2, y: centerY - numberSize.height / 2), withAttributes: attrNumber)
-                let labelY = centerY + numberSize.height / 2 + 4
-                (labelText as NSString).draw(at: CGPoint(x: centerX - labelSize.width / 2, y: labelY), withAttributes: attrLabel)
-            case 2:
-                let startX = centerX - totalWidth / 2
-                (labelText as NSString).draw(at: CGPoint(x: startX, y: centerY - labelSize.height / 2), withAttributes: attrLabel)
-                (hrText as NSString).draw(at: CGPoint(x: startX + labelSize.width + spacing, y: centerY - numberSize.height / 2), withAttributes: attrNumber)
-            case 3:
-                let startX = centerX - totalWidth / 2
-                (hrText as NSString).draw(at: CGPoint(x: startX, y: centerY - numberSize.height / 2), withAttributes: attrNumber)
-                (labelText as NSString).draw(at: CGPoint(x: startX + numberSize.width + spacing, y: centerY - labelSize.height / 2), withAttributes: attrLabel)
-            default:
-                (hrText as NSString).draw(at: CGPoint(x: centerX - numberSize.width / 2, y: centerY - numberSize.height / 2), withAttributes: attrNumber)
-            }
-        }
-    }
-
-    private func cleanupOldFiles(keep keepURL: URL) {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: URL(fileURLWithPath: NSTemporaryDirectory()), includingPropertiesForKeys: [.creationDateKey], options: []) else { return }
-        let pipFiles = files.filter { $0.lastPathComponent.hasPrefix("pip_hr_") && $0.path != keepURL.path }
-        pipFiles.forEach { try? fm.removeItem(at: $0) }
     }
 }

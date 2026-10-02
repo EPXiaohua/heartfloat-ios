@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 import UIKit
 import AVKit
 import AVFoundation
@@ -18,33 +19,22 @@ class HeartRateViewModel: NSObject, ObservableObject {
     private let settings = SettingsManager.shared
     private let renderer = HeartRateVideoRenderer.shared
     private var cancellables = Set<AnyCancellable>()
-    private var settingsCancellable: AnyCancellable?
     private var pipController: AVPictureInPictureController?
     private var pipPlayer: AVQueuePlayer?
     private var pipPlayerLayer: AVPlayerLayer?
-    private var pipPlayerView: UIView?
-    private var pipKvoObserver: NSKeyValueObservation?
-    private var pipTimeObserver: Any?
     private var pipLooper: AVPlayerLooper?
-    private var lastRenderedHeartRate: Int = -1
-    private var lastRenderedSettingsHash: Int = 0
-    private var pendingRefreshWorkItem: DispatchWorkItem?
-    private var isRefreshingVideo = false
+    private var pipCarrierView: UIView?
+    private var pipOverlay: HeartRatePipView?
     private var userRequestedStop = false
-    private var pipSessionActive = false
 
     override init() {
         super.init()
         setupBindings()
-        observeSettingsChanges()
     }
 
     deinit {
         userRequestedStop = true
-        stopPip()
-        pipKvoObserver?.invalidate()
-        settingsCancellable?.cancel()
-        if let obs = pipTimeObserver { pipPlayer?.removeTimeObserver(obs) }
+        teardownPip(log: false)
     }
 
     private func setupBindings() {
@@ -53,9 +43,8 @@ class HeartRateViewModel: NSObject, ObservableObject {
             .sink { [weak self] rate in
                 self?.heartRate = rate
                 self?.httpServer.updateHeartRate(rate, contact: self?.isContact ?? false)
-                if self?.pipSessionActive == true {
-                    self?.schedulePipRefresh(heartRate: rate)
-                }
+                // 实时刷新画中画悬浮窗 UI（无需重新生成视频）
+                self?.pipOverlay?.update(heartRate: rate)
             }
             .store(in: &cancellables)
 
@@ -70,15 +59,15 @@ class HeartRateViewModel: NSObject, ObservableObject {
         bleService.$logMessages
             .receive(on: DispatchQueue.main)
             .assign(to: &$logMessages)
-    }
 
-    private func observeSettingsChanges() {
-        settingsCancellable = settings.objectWillChange
+        // 设置变化实时应用到悬浮窗
+        settings.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self = self, self.pipSessionActive else { return }
-                self.schedulePipRefresh(heartRate: self.heartRate)
+                guard let self = self else { return }
+                self.pipOverlay?.apply(settings: self.settings)
             }
+            .store(in: &cancellables)
     }
 
     func connect() {
@@ -90,7 +79,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
 
     func togglePip() {
-        if pipSessionActive {
+        if isPipActive {
             stopPip()
         } else {
             startPip()
@@ -107,28 +96,18 @@ class HeartRateViewModel: NSObject, ObservableObject {
             return
         }
 
-        addLog("正在生成心率视频...")
-        isRefreshingVideo = true
         userRequestedStop = false
+        addLog("正在准备画中画载体视频...")
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            guard let url = self.renderer.generateVideo(
-                heartRate: self.heartRate,
-                settings: self.settings
-            ) else {
+            guard let url = self.renderer.generateBlackVideo() else {
                 DispatchQueue.main.async {
-                    self.addLog("视频生成失败")
-                    self.isRefreshingVideo = false
+                    self.addLog("载体视频生成失败")
                 }
                 return
             }
-
-            self.lastRenderedHeartRate = self.heartRate
-            self.lastRenderedSettingsHash = self.settingsHash()
-
             DispatchQueue.main.async {
-                self.isRefreshingVideo = false
                 self.setupPipPlayer(videoURL: url)
             }
         }
@@ -136,70 +115,25 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
     func stopPip() {
         userRequestedStop = true
-        pendingRefreshWorkItem?.cancel()
-        pendingRefreshWorkItem = nil
-        pipKvoObserver?.invalidate()
-        pipKvoObserver = nil
+        teardownPip(log: true)
+    }
 
+    private func teardownPip(log: Bool) {
         isPipActive = false
-        pipSessionActive = false
         pipController?.delegate = nil
         pipController?.stopPictureInPicture()
         pipController = nil
-
-        if let obs = pipTimeObserver { pipPlayer?.removeTimeObserver(obs) }
-        pipTimeObserver = nil
         pipLooper = nil
         pipPlayer?.pause()
         pipPlayer = nil
         pipPlayerLayer?.removeFromSuperlayer()
         pipPlayerLayer = nil
-        pipPlayerView?.removeFromSuperview()
-        pipPlayerView = nil
-
-        restoreAudioSession()
-        addLog("画中画已关闭")
-    }
-
-    private func schedulePipRefresh(heartRate: Int) {
-        if heartRate == lastRenderedHeartRate && settingsHash() == lastRenderedSettingsHash { return }
-        if isRefreshingVideo { return }
-
-        pendingRefreshWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.refreshPipVideo(heartRate: heartRate)
-        }
-        pendingRefreshWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
-    }
-
-    private func refreshPipVideo(heartRate: Int) {
-        guard pipSessionActive else { return }
-        isRefreshingVideo = true
-
-        addLog("更新心率视频...")
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            guard let url = self.renderer.generateVideo(
-                heartRate: heartRate,
-                settings: self.settings
-            ) else {
-                DispatchQueue.main.async {
-                    self.addLog("视频更新失败")
-                    self.isRefreshingVideo = false
-                }
-                return
-            }
-
-            self.lastRenderedHeartRate = heartRate
-            self.lastRenderedSettingsHash = self.settingsHash()
-
-            DispatchQueue.main.async {
-                self.isRefreshingVideo = false
-                self.replacePlayerItem(url: url)
-                self.addLog("心率视频已更新")
-            }
+        pipCarrierView?.removeFromSuperview()
+        pipCarrierView = nil
+        removeOverlay()
+        if log {
+            restoreAudioSession()
+            addLog("画中画已关闭")
         }
     }
 
@@ -222,118 +156,99 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
 
     private func setupPipPlayer(videoURL: URL) {
-        guard let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene }).first,
-            let keyWindow = scene.windows.first(where: { $0.isKeyWindow }) else {
+        guard let keyWindow = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? UIApplication.shared.windows.first else {
             addLog("无法获取窗口")
             return
         }
 
         configureAudioSession()
+        addLog("PiP 载体就绪，启动播放器...")
 
-        addLog("PiP 视频就绪，启动播放器...")
+        let item = AVPlayerItem(url: videoURL)
+        let player = AVQueuePlayer(playerItem: item)
+        player.isMuted = true
+        player.preventsDisplaySleepDuringVideoPlayback = false
 
-        let asset = AVAsset(url: videoURL)
-        let playerItem = AVPlayerItem(asset: asset)
-        let qPlayer = AVQueuePlayer(playerItem: playerItem)
-        qPlayer.isMuted = true
-        qPlayer.preventsDisplaySleepDuringVideoPlayback = false
-        qPlayer.allowsExternalPlayback = false
+        let looper = AVPlayerLooper(player: player, templateItem: item)
 
-        let looper = AVPlayerLooper(player: qPlayer, templateItem: playerItem)
-        pipLooper = looper
+        let layer = AVPlayerLayer(player: player)
+        layer.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+        layer.videoGravity = .resizeAspect
 
-        let layer = AVPlayerLayer(player: qPlayer)
-        layer.frame = CGRect(x: 0, y: 0, width: 8, height: 8)
-        layer.backgroundColor = UIColor.clear.cgColor
-        layer.videoGravity = .resizeAspectFill
-
-        let container = UIView(frame: CGRect(x: -10, y: -10, width: 8, height: 8))
-        container.backgroundColor = .clear
-        container.clipsToBounds = true
-        container.alpha = 0.01
-        container.layer.addSublayer(layer)
-        keyWindow.addSubview(container)
+        let carrier = UIView(frame: CGRect(x: -10, y: -10, width: 1, height: 1))
+        carrier.alpha = 0.01
+        carrier.layer.addSublayer(layer)
+        keyWindow.addSubview(carrier)
 
         let controller = AVPictureInPictureController(playerLayer: layer)
         controller?.canStartPictureInPictureAutomaticallyFromInline = true
         controller?.delegate = self
+        // 隐藏画中画系统控制按钮（播放/快进/进度条），参考 CaiWanFeng/PiP
+        controller?.setValue(1, forKey: "controlsStyle")
 
-        pipPlayer = qPlayer
+        pipPlayer = player
         pipPlayerLayer = layer
-        pipPlayerView = container
+        pipLooper = looper
         pipController = controller
-        pipSessionActive = true
 
-        qPlayer.play()
+        player.play()
 
-        var checkCount = 0
-        let maxChecks = 20
+        var checks = 0
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
-            guard let self = self, self.pipController != nil else {
+            guard let self = self, let ctrl = self.pipController else {
                 timer.invalidate()
                 return
             }
-            checkCount += 1
-            let possible = self.pipController?.isPictureInPicturePossible ?? false
-            let status = self.pipPlayer?.timeControlStatus.rawValue ?? -1
-
-            if checkCount <= 3 || checkCount % 3 == 0 {
-                self.addLog("PiP 检查 \(checkCount): possible=\(possible), playerStatus=\(status)")
-            }
-
-            if possible && !self.isPipActive && !self.userRequestedStop {
+            checks += 1
+            if ctrl.isPictureInPicturePossible && !self.isPipActive && !self.userRequestedStop {
                 timer.invalidate()
-                self.addLog("PiP 就绪! 启动中...")
-                self.pipController?.startPictureInPicture()
-            } else if checkCount >= maxChecks {
+                self.addLog("PiP 就绪，启动中...")
+                ctrl.startPictureInPicture()
+            } else if checks >= 20 {
                 timer.invalidate()
-                let item = self.pipPlayer?.currentItem
-                let loaded = item?.status.rawValue ?? -1
-                let duration = item?.duration.seconds ?? 0
-                self.addLog("PiP 超时 (\(maxChecks)次检查)")
-                self.addLog("  isPossible: \(self.pipController?.isPictureInPicturePossible ?? false)")
-                self.addLog("  playerStatus: \(self.pipPlayer?.timeControlStatus.rawValue ?? -1)")
-                self.addLog("  itemStatus: \(loaded), duration: \(duration)s")
-                self.cleanupPipResources()
+                self.addLog("PiP 启动超时 (possible=\(ctrl.isPictureInPicturePossible))")
+                self.teardownPip(log: false)
             }
         }
     }
 
-    private func replacePlayerItem(url: URL) {
-        let newItem = AVPlayerItem(url: url)
-        pipPlayer?.replaceCurrentItem(with: newItem)
-        pipLooper = AVPlayerLooper(player: pipPlayer!, templateItem: newItem)
+    // MARK: - 画中画窗口叠加 UI（核心：任意自定义视图渲染到画中画窗口上）
+
+    private func attachOverlayToPipWindow(mainWindow: UIWindow?) {
+        removeOverlay()
+
+        // 画中画启动后系统会创建一个新 window，选它而不是主 window
+        let windows = UIApplication.shared.windows
+        let pipWindow = windows.first { $0 !== mainWindow && !$0.isKeyWindow }
+            ?? windows.first { $0 !== mainWindow }
+            ?? windows.first
+
+        guard let target = pipWindow else {
+            addLog("未找到画中画窗口")
+            return
+        }
+
+        let overlay = HeartRatePipView()
+        overlay.apply(settings: settings)
+        overlay.update(heartRate: heartRate)
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        target.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: target.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: target.bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: target.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: target.trailingAnchor)
+        ])
+        pipOverlay = overlay
+        addLog("悬浮窗 UI 已叠加到画中画窗口 ✅")
     }
 
-    private func cleanupPipResources() {
-        if let obs = pipTimeObserver { pipPlayer?.removeTimeObserver(obs) }
-        pipTimeObserver = nil
-        pipKvoObserver?.invalidate()
-        pipKvoObserver = nil
-        pipLooper = nil
-        pipPlayer?.pause()
-        pipPlayer = nil
-        pipPlayerLayer?.removeFromSuperlayer()
-        pipPlayerLayer = nil
-        pipPlayerView?.removeFromSuperview()
-        pipPlayerView = nil
-        pipController = nil
-        isPipActive = false
-        pipSessionActive = false
-        restoreAudioSession()
+    private func removeOverlay() {
+        pipOverlay?.removeFromSuperview()
+        pipOverlay = nil
     }
 
-    private func settingsHash() -> Int {
-        var hasher = Hasher()
-        hasher.combine(settings.bpmNumberSize)
-        hasher.combine(settings.bpmNumberColorHex)
-        hasher.combine(settings.bpmLabelSize)
-        hasher.combine(settings.bpmLabelColorHex)
-        hasher.combine(settings.bpmPosition)
-        hasher.combine(settings.backgroundOpacity)
-        return hasher.finalize()
-    }
+    // MARK: - 日志
 
     func clearLogs() {
         logMessages.removeAll()
@@ -366,6 +281,8 @@ class HeartRateViewModel: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - HTTP 服务
+
     func startHttpServer(port: Int) {
         if httpServer.startServer(port: port) {
             addLog("HTTP服务已启动，端口: \(port)")
@@ -380,31 +297,121 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
 }
 
+// MARK: - AVPictureInPictureControllerDelegate
+
 extension HeartRateViewModel: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        hidePlayerCompletely()
+        // 记录主 window（启动 PiP 前的 keyWindow），用于区分新的 PiP window
+        let mainWindow = pipCarrierView?.window
         isPipActive = true
         addLog("画中画已启动 ✅")
+        attachOverlayToPipWindow(mainWindow: mainWindow)
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        if userRequestedStop {
-            addLog("用户关闭了画中画")
-            return
-        }
         isPipActive = false
-        addLog("系统暂停了画中画（切回前台），播放器保持运行中，心率继续更新")
-        hidePlayerCompletely()
+        removeOverlay()
+        addLog("画中画已停止")
+        teardownPip(log: false)
     }
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
         addLog("画中画启动失败: \(error.localizedDescription)")
-        cleanupPipResources()
+        teardownPip(log: false)
+    }
+}
+
+// MARK: - 心率悬浮窗视图（渲染到画中画窗口上的自定义 UI）
+
+final class HeartRatePipView: UIView {
+
+    private let cardView = UIView()
+    private let numberLabel = UILabel()
+    private let bpmLabel = UILabel()
+    private var currentSettings: SettingsManager?
+    private var currentHeartRate: Int = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+
+        cardView.backgroundColor = .black
+        cardView.clipsToBounds = true
+        addSubview(cardView)
+
+        numberLabel.textAlignment = .center
+        numberLabel.text = "--"
+        cardView.addSubview(numberLabel)
+
+        bpmLabel.textAlignment = .center
+        bpmLabel.text = "BPM"
+        cardView.addSubview(bpmLabel)
     }
 
-    private func hidePlayerCompletely() {
-        guard let view = pipPlayerView else { return }
-        view.alpha = 0
-        view.frame = CGRect(x: -1000, y: -1000, width: 1, height: 1)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func apply(settings: SettingsManager) {
+        currentSettings = settings
+        let numberColor = UIColor(Color(hex: settings.bpmNumberColorHex))
+        let labelColor = UIColor(Color(hex: settings.bpmLabelColorHex))
+        numberLabel.textColor = numberColor
+        bpmLabel.textColor = labelColor
+        cardView.alpha = max(0.1, min(1.0, CGFloat(settings.backgroundOpacity) / 100.0))
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+
+    func update(heartRate: Int) {
+        currentHeartRate = heartRate
+        numberLabel.text = heartRate > 0 ? "\(heartRate)" : "--"
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let s = currentSettings else { return }
+
+        let boundsW = bounds.width
+        let boundsH = bounds.height
+        guard boundsW > 10, boundsH > 10 else { return }
+
+        // 卡片区域
+        let inset: CGFloat = min(boundsW, boundsH) * 0.03
+        let cardFrame = bounds.insetBy(dx: inset, dy: inset)
+        cardView.frame = cardFrame
+        cardView.layer.cornerRadius = min(28, cardFrame.height * 0.18)
+
+        // 字体随卡片尺寸缩放（基准 240x160 下的 size*2.5 / size*2）
+        let scale = min(cardFrame.width / 240.0, cardFrame.height / 160.0)
+        numberLabel.font = .systemFont(ofSize: CGFloat(s.bpmNumberSize) * 2.5 * scale, weight: .bold)
+        bpmLabel.font = .systemFont(ofSize: CGFloat(s.bpmLabelSize) * 2.0 * scale, weight: .medium)
+
+        let numberSize = numberLabel.text?.size(withAttributes: [.font: numberLabel.font]) ?? .zero
+        let labelSize = bpmLabel.text?.size(withAttributes: [.font: bpmLabel.font]) ?? .zero
+        let spacing: CGFloat = 8 * scale
+
+        let cx = cardFrame.midX
+        let cy = cardFrame.midY
+
+        switch s.bpmPosition {
+        case 0: // BPM 在数字上方
+            numberLabel.frame = CGRect(x: cx - numberSize.width / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: cx - labelSize.width / 2, y: numberLabel.frame.minY - labelSize.height - spacing, width: labelSize.width + 4, height: labelSize.height)
+        case 1: // BPM 在数字下方
+            numberLabel.frame = CGRect(x: cx - numberSize.width / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: cx - labelSize.width / 2, y: numberLabel.frame.maxY + spacing, width: labelSize.width + 4, height: labelSize.height)
+        case 2: // BPM 在数字左侧
+            let totalW = numberSize.width + spacing + labelSize.width
+            bpmLabel.frame = CGRect(x: cx - totalW / 2, y: cy - labelSize.height / 2, width: labelSize.width + 4, height: labelSize.height)
+            numberLabel.frame = CGRect(x: bpmLabel.frame.maxX + spacing, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
+        case 3: // BPM 在数字右侧
+            let totalW = numberSize.width + spacing + labelSize.width
+            numberLabel.frame = CGRect(x: cx - totalW / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: numberLabel.frame.maxX + spacing, y: cy - labelSize.height / 2, width: labelSize.width + 4, height: labelSize.height)
+        default:
+            numberLabel.frame = CGRect(x: cx - numberSize.width / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: cx - labelSize.width / 2, y: numberLabel.frame.maxY + spacing, width: labelSize.width + 4, height: labelSize.height)
+        }
     }
 }
