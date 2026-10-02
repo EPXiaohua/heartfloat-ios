@@ -12,8 +12,10 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var logMessages: [String] = []
     @Published var isPipActive: Bool = false
     @Published var showConnectionOverlay: Bool = false
-    /// 最近 60 秒心率曲线（固定长度，配合 Path 插值动画）
+    /// 最近 60 秒心率曲线（固定长度，供 Canvas 逐帧绘制）
     @Published var heartRateHistory: [Double] = Array(repeating: 0, count: 60)
+    /// 最近一次心率采样时间（供滚动动画插值）
+    var lastSampleAt: Date = .distantPast
 
     private let bleService = BleService.shared
     private let httpServer = HttpServerManager.shared
@@ -47,9 +49,10 @@ class HeartRateViewModel: NSObject, ObservableObject {
                 // 去重：手环静坐时心率长时间不变，避免每秒无效刷新 UI
                 guard rate != self.heartRate else { return }
                 self.heartRate = rate
-                // 推入曲线历史（固定窗口滚动）
+                // 推入曲线历史（固定窗口滚动），并记录采样时间供滚动动画插值
                 self.heartRateHistory.removeFirst()
                 self.heartRateHistory.append(Double(rate))
+                self.lastSampleAt = Date()
                 // 实时刷新画中画悬浮窗 UI（无需重新生成视频）
                 self.pipOverlay?.update(heartRate: rate)
             }

@@ -4,8 +4,6 @@ struct MainView: View {
     @EnvironmentObject var viewModel: HeartRateViewModel
     @EnvironmentObject var settings: SettingsManager
 
-    @State private var heartPulse = false
-
     private let themeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
 
     var body: some View {
@@ -48,12 +46,8 @@ struct MainView: View {
 
     private var heartRateDisplay: some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "heart.fill")
-                .font(.system(size: 40))
-                .foregroundColor(themeColor)
-                .scaleEffect(heartPulse ? 1.18 : 1.0)
-                .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: heartPulse)
-                .opacity(viewModel.connectionState == .connected ? 1 : 0.35)
+            // 爱心按当前心率节拍跳动
+            PulsingHeartIcon(bpm: viewModel.heartRate, active: viewModel.connectionState == .connected, color: themeColor)
 
             Text(viewModel.heartRate > 0 ? "\(viewModel.heartRate)" : "--")
                 .font(.system(size: 64, weight: .bold, design: .rounded))
@@ -66,7 +60,6 @@ struct MainView: View {
                 .padding(.top, 26)
         }
         .padding(.top, 4)
-        .onAppear { heartPulse = true }
     }
 
     private var statusSection: some View {
@@ -94,90 +87,13 @@ struct MainView: View {
                     .foregroundColor(Color(.tertiaryLabel))
             }
 
-            GeometryReader { geo in
-                let data = ChartData(values: viewModel.heartRateHistory)
-                let endPoint = chartEndPoint(data: data, in: geo.size)
-
-                ZStack(alignment: .topLeading) {
-                    // 曲线下方渐变填充
-                    HeartRateCurveShape(data: data, filled: true)
-                        .fill(
-                            LinearGradient(
-                                colors: [themeColor.opacity(0.35), themeColor.opacity(0.02)],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
-
-                    // 平滑贝塞尔曲线（ease-out：先快后慢的过渡动画）
-                    HeartRateCurveShape(data: data, filled: false)
-                        .stroke(
-                            LinearGradient(
-                                colors: [themeColor.opacity(0.75), themeColor],
-                                startPoint: .leading, endPoint: .trailing
-                            ),
-                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
-                        )
-
-                    // 曲线末端脉冲圆点
-                    if hasValidData {
-                        Circle()
-                            .fill(themeColor)
-                            .frame(width: 8, height: 8)
-                            .position(endPoint)
-                            .overlay(
-                                Circle()
-                                    .stroke(themeColor.opacity(0.4))
-                                    .frame(width: 8, height: 8)
-                                    .scaleEffect(heartPulse ? 2.4 : 1.0)
-                                    .opacity(heartPulse ? 0 : 1)
-                                    .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false), value: heartPulse)
-                            )
-                    }
-                }
-            }
-            .frame(height: 150)
-            .animation(.easeOut(duration: 0.7), value: viewModel.heartRateHistory)
+            HeartRateChartView(themeColor: themeColor)
+                .frame(height: 150)
         }
         .padding(14)
         .background(Color.white.opacity(0.9))
         .cornerRadius(18)
         .shadow(color: themeColor.opacity(0.10), radius: 10, y: 4)
-        .overlay(
-            // 无数据占位
-            Group {
-                if !hasValidData {
-                    Text(viewModel.connectionState == .connected ? "正在采集心率数据..." : "连接手环后显示心率曲线")
-                        .font(.system(size: 13))
-                        .foregroundColor(Color(.tertiaryLabel))
-                }
-            }
-        )
-    }
-
-    private var hasValidData: Bool {
-        viewModel.heartRateHistory.contains { $0 > 0 }
-    }
-
-    /// 曲线末端坐标（与 HeartRateCurveShape 内部映射公式完全一致）
-    private func chartEndPoint(data: ChartData, in size: CGSize) -> CGPoint {
-        let values = data.values
-        let validValues = values.filter { $0 > 0 }
-        guard let last = values.last, last > 0, !validValues.isEmpty else {
-            return CGPoint(x: size.width - 4, y: size.height)
-        }
-
-        var maxValue = validValues.max() ?? 100
-        var minValue = validValues.min() ?? 60
-        if maxValue - minValue < 8 {
-            let mid = (maxValue + minValue) / 2
-            minValue = mid - 4
-            maxValue = mid + 4
-        }
-
-        let ratio = min(max((last - minValue) / (maxValue - minValue), 0.02), 1.0)
-        let h = size.height
-        let y = h * 0.08 + h * 0.92 * (1 - ratio * 0.92)
-        return CGPoint(x: size.width - 4, y: min(max(y, 4), h - 4))
     }
 
     // MARK: - 按钮
@@ -289,120 +205,190 @@ struct MainView: View {
     }
 }
 
-// MARK: - 心率平滑曲线（Catmull-Rom → 三次贝塞尔）
+// MARK: - 爱心图标（按当前心率节拍真实跳动）
 
-struct HeartRateCurveShape: Shape {
-    var data: ChartData
-    var filled: Bool
+struct PulsingHeartIcon: View {
+    let bpm: Int
+    let active: Bool
+    let color: Color
 
-    func path(in rect: CGRect) -> Path {
-        let values = data.values
-        guard values.count > 1, rect.width > 0, rect.height > 0 else { return Path() }
+    @State private var beating = false
+    @State private var beatToken = UUID()
 
-        let validValues = values.filter { $0 > 0 }
-        guard !validValues.isEmpty else { return Path() }
+    var body: some View {
+        Image(systemName: "heart.fill")
+            .font(.system(size: 40))
+            .foregroundColor(color)
+            .scaleEffect(beating ? 1.22 : 1.0)
+            .opacity(active ? 1 : 0.35)
+            .onAppear(perform: restart)
+            .onChange(of: bpm) { _ in restart() }
+            .onChange(of: active) { _ in restart() }
+    }
 
-        var maxValue = validValues.max() ?? 100
-        var minValue = validValues.min() ?? 60
-        // 幅度过小时扩一点，避免曲线退化成贴边直线
-        if maxValue - minValue < 8 {
-            let mid = (maxValue + minValue) / 2
-            minValue = mid - 4
-            maxValue = mid + 4
+    private func restart() {
+        beatToken = UUID()
+        beating = false
+        if active {
+            startLoop(token: beatToken)
         }
+    }
 
-        let topInset = rect.height * 0.08
-        let usableHeight = rect.height - topInset
-
-        func mappedPoint(index: Int) -> CGPoint {
-            let x = rect.width * CGFloat(index) / CGFloat(values.count - 1)
-            let v = values[index]
-            let ratio: CGFloat
-            if v <= 0 {
-                // 无数据点画在最底
-                ratio = 0
-            } else {
-                let r = CGFloat((Double(v) - minValue) / Double(maxValue - minValue))
-                ratio = min(max(r, 0.02), 1.0)
-            }
-            let y = topInset + usableHeight * (1 - CGFloat(ratio) * 0.92)
-            return CGPoint(x: x, y: y)
+    /// 以 60/bpm 秒为周期循环：收缩 0.1s → 舒张 0.3s → 等待
+    private func startLoop(token myToken: UUID) {
+        guard active, bpm >= 30 else { return }
+        let interval = 60.0 / Double(max(bpm, 30))
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval) { [token = beatToken] in
+            guard token == myToken else { return }
+            beat(token: myToken)
         }
+    }
 
-        let points = (0..<values.count).map(mappedPoint)
-
-        var path = Path()
-        path.move(to: points[0])
-        if points.count == 2 {
-            path.addLine(to: points[1])
-        } else {
-            // Catmull-Rom 样条转换成三次贝塞尔，过渡平滑
-            for i in 0..<points.count - 1 {
-                let p0 = points[max(i - 1, 0)]
-                let p1 = points[i]
-                let p2 = points[i + 1]
-                let p3 = points[min(i + 2, points.count - 1)]
-
-                let cp1 = CGPoint(
-                    x: p1.x + (p2.x - p0.x) / 6,
-                    y: p1.y + (p2.y - p0.y) / 6
-                )
-                let cp2 = CGPoint(
-                    x: p2.x - (p3.x - p1.x) / 6,
-                    y: p2.y - (p3.y - p1.y) / 6
-                )
-                path.addCurve(to: p2, control1: cp1, control2: cp2)
-            }
+    private func beat(token myToken: UUID) {
+        guard token == beatToken else { return }
+        withAnimation(.easeOut(duration: 0.1)) { beating = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            guard token == myToken else { return }
+            withAnimation(.easeInOut(duration: 0.3)) { beating = false }
+            startLoop(token: myToken)
         }
-
-        if filled {
-            path.addLine(to: CGPoint(x: rect.width, y: rect.height))
-            path.addLine(to: CGPoint(x: 0, y: rect.height))
-            path.closeSubpath()
-        }
-        return path
     }
 }
 
-/// 固定长度 Double 数组，实现 VectorArithmetic 以支持 SwiftUI Path 插值动画
-struct ChartData: VectorArithmetic {
-    var values: [Double]
+// MARK: - 实时心率图表（Canvas 逐帧绘制：网格 + 数值/时间刻度 + 直线折线 + 心电图式滚动）
 
-    static var zero: ChartData { ChartData(values: []) }
+struct HeartRateChartView: View {
+    @EnvironmentObject var viewModel: HeartRateViewModel
+    let themeColor: Color
 
-    var magnitudeSquared: Double {
-        values.reduce(0) { $0 + $1 * $1 }
-    }
-
-    static func + (lhs: ChartData, rhs: ChartData) -> ChartData {
-        var result = lhs
-        result += rhs
-        return result
-    }
-
-    static func - (lhs: ChartData, rhs: ChartData) -> ChartData {
-        var result = lhs
-        result -= rhs
-        return result
-    }
-
-    static func += (lhs: inout ChartData, rhs: ChartData) {
-        guard lhs.values.count == rhs.values.count else { return }
-        for i in 0..<lhs.values.count {
-            lhs.values[i] += rhs.values[i]
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            Canvas { context, size in
+                draw(in: &context, size: size, now: timeline.date)
+            }
         }
     }
 
-    static func -= (lhs: inout ChartData, rhs: ChartData) {
-        guard lhs.values.count == rhs.values.count else { return }
-        for i in 0..<lhs.values.count {
-            lhs.values[i] -= rhs.values[i]
+    private func draw(in context: inout GraphicsContext, size: CGSize, now: Date) {
+        let values = viewModel.heartRateHistory
+        let validValues = values.filter { $0 > 0 }
+
+        // 绘图区（左侧留 BPM 标签、底部留时间标签）
+        let plot = CGRect(x: 34, y: 6, width: size.width - 40, height: size.height - 24)
+
+        // 无数据：占位提示
+        if validValues.isEmpty {
+            let hint = viewModel.connectionState == .connected ? "正在采集心率数据..." : "连接手环后显示心率曲线"
+            context.draw(
+                Text(hint).font(.system(size: 13)).foregroundColor(Color(.tertiaryLabel)),
+                at: CGPoint(x: size.width / 2, y: size.height / 2)
+            )
+            drawGrid(plot: plot, in: &context, lo: 60, hi: 100)
+            return
+        }
+
+        // 值范围（取整到 10，幅度小时扩到 20）
+        var hi = ceil((validValues.max() ?? 100) / 10) * 10
+        var lo = floor((validValues.min() ?? 60) / 10) * 10
+        if hi - lo < 20 {
+            let mid = (hi + lo) / 2
+            lo = mid - 10
+            hi = mid + 10
+        }
+
+        drawGrid(plot: plot, in: &context, lo: lo, hi: hi)
+
+        // 滚动动画进度：新样本到来后 0.6 秒内，曲线从右移一格的位置平滑滑回（ease-out：先快后慢）
+        let elapsed = now.timeIntervalSince(viewModel.lastSampleAt)
+        let t = min(max(elapsed / 0.6, 0), 1)
+        let progress = 1 - pow(1 - t, 3) // cubic ease-out
+
+        // 值 → y 坐标
+        func yFor(_ v: Double) -> CGFloat {
+            let ratio = min(max((v - lo) / (hi - lo), 0), 1)
+            return plot.maxY - CGFloat(ratio) * plot.height
+        }
+
+        // 剪裁绘图区，滚动时旧点滑出边界
+        context.clip(to: Path(plot))
+
+        // 折线：直线段连接（心电图风格），x 随滚动进度整体平移一格
+        var line = Path()
+        let n = values.count
+        for i in 0..<n where values[i] > 0 {
+            let x = plot.minX + CGFloat((Double(i) + (1 - progress)) / Double(n - 1)) * plot.width
+            let p = CGPoint(x: x, y: yFor(values[i]))
+            if i == 0 || values[i - 1] <= 0 {
+                line.move(to: p)
+            } else {
+                line.addLine(to: p)
+            }
+        }
+
+        // 渐变填充
+        var fill = line
+        fill.addLine(to: CGPoint(x: plot.maxX, y: plot.maxY))
+        fill.addLine(to: CGPoint(x: plot.minX, y: plot.maxY))
+        fill.closeSubpath()
+        context.fill(fill, with: .linearGradient(
+            Gradient(colors: [themeColor.opacity(0.30), themeColor.opacity(0.02)]),
+            startPoint: CGPoint(x: 0, y: plot.minY),
+            endPoint: CGPoint(x: 0, y: plot.maxY)
+        ))
+
+        // 折线描边
+        context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+
+        // 末端圆点：跟随滚动位置，并按心率节拍向外扩散
+        if let lastValue = values.last, lastValue > 0 {
+            let headX = plot.minX + CGFloat((Double(n - 1) + (1 - progress)) / Double(n - 1)) * plot.width
+            let head = CGPoint(x: headX, y: yFor(lastValue))
+
+            let bpm = max(viewModel.heartRate, 40)
+            let beatInterval = 60.0 / Double(bpm)
+            let phase = now.timeIntervalSince(viewModel.lastSampleAt).truncatingRemainder(dividingBy: beatInterval) / beatInterval
+            let expand = 1 - phase // 1 → 0 向外扩散衰减
+
+            context.fill(Path(ellipseIn: CGRect(x: head.x - 4, y: head.y - 4, width: 8, height: 8)), with: .color(themeColor))
+            context.stroke(
+                Path(ellipseIn: CGRect(x: head.x - 5 - 7 * expand, y: head.y - 5 - 7 * expand, width: 10 + 14 * expand, height: 10 + 14 * expand)),
+                with: .color(themeColor.opacity(0.5 * expand)),
+                lineWidth: 1.5
+            )
         }
     }
 
-    mutating func scale(by rhs: Double) {
-        for i in 0..<values.count {
-            values[i] *= rhs
+    /// 网格线 + 横向 BPM 数值 + 纵向时间刻度
+    private func drawGrid(plot: CGRect, in context: inout GraphicsContext, lo: Double, hi: Double) {
+        let labelColor = Color(.tertiaryLabel)
+        let gridColor = Color(.systemGray5)
+
+        // 水平网格：上 / 中 / 下 三条，标注 BPM 值
+        let gridValues: [Double] = [hi, (hi + lo) / 2, lo]
+        for v in gridValues {
+            let y = plot.maxY - CGFloat((v - lo) / (hi - lo)) * plot.height
+            var grid = Path()
+            grid.move(to: CGPoint(x: plot.minX, y: y))
+            grid.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(grid, with: .color(gridColor), lineWidth: 0.8)
+            context.draw(
+                Text("\(Int(v))").font(.system(size: 9, design: .monospaced)).foregroundColor(labelColor),
+                at: CGPoint(x: plot.minX - 14, y: y)
+            )
+        }
+
+        // 垂直网格：-60s / -40s / -20s / 现在
+        let timeMarks: [(String, CGFloat)] = [("-60s", 0), ("-40s", 1.0 / 3.0), ("-20s", 2.0 / 3.0), ("现在", 1)]
+        for (label, frac) in timeMarks {
+            let x = plot.minX + frac * plot.width
+            var grid = Path()
+            grid.move(to: CGPoint(x: x, y: plot.minY))
+            grid.addLine(to: CGPoint(x: x, y: plot.maxY))
+            context.stroke(grid, with: .color(gridColor), lineWidth: 0.8)
+            context.draw(
+                Text(label).font(.system(size: 9)).foregroundColor(labelColor),
+                at: CGPoint(x: x, y: plot.maxY + 10)
+            )
         }
     }
 }
