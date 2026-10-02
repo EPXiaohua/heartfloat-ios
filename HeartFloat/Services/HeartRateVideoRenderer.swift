@@ -44,7 +44,7 @@ final class HeartRateVideoRenderer {
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: input,
             sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String: Int(videoSize.width),
                 kCVPixelBufferHeightKey as String: Int(videoSize.height)
             ]
@@ -88,7 +88,7 @@ final class HeartRateVideoRenderer {
         ]
 
         var pixelBuffer: CVPixelBuffer?
-        CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32ARGB, attrs as CFDictionary, &pixelBuffer)
+        CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &pixelBuffer)
         guard let buffer = pixelBuffer else { return nil }
 
         CVPixelBufferLockBaseAddress(buffer, [])
@@ -101,7 +101,7 @@ final class HeartRateVideoRenderer {
             bitsPerComponent: 8,
             bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
             space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         ) else { return nil }
 
         // 纯黑填充 —— 黑色在任何颜色空间下都是黑色，杜绝色偏

@@ -340,10 +340,16 @@ final class HeartRatePipView: UIView {
         addSubview(cardView)
 
         numberLabel.textAlignment = .center
+        numberLabel.lineBreakMode = .byClipping
+        numberLabel.adjustsFontSizeToFitWidth = true
+        numberLabel.minimumScaleFactor = 0.5
         numberLabel.text = "--"
         cardView.addSubview(numberLabel)
 
         bpmLabel.textAlignment = .center
+        bpmLabel.lineBreakMode = .byClipping
+        bpmLabel.adjustsFontSizeToFitWidth = true
+        bpmLabel.minimumScaleFactor = 0.5
         bpmLabel.text = "BPM"
         cardView.addSubview(bpmLabel)
     }
@@ -366,6 +372,9 @@ final class HeartRatePipView: UIView {
     func update(heartRate: Int) {
         currentHeartRate = heartRate
         numberLabel.text = heartRate > 0 ? "\(heartRate)" : "--"
+        // 文本宽度变化后重新布局，避免被截断成省略号
+        setNeedsLayout()
+        layoutIfNeeded()
     }
 
     override func layoutSubviews() {
@@ -376,42 +385,44 @@ final class HeartRatePipView: UIView {
         let boundsH = bounds.height
         guard boundsW > 10, boundsH > 10 else { return }
 
-        // 卡片区域
-        let inset: CGFloat = min(boundsW, boundsH) * 0.03
-        let cardFrame = bounds.insetBy(dx: inset, dy: inset)
-        cardView.frame = cardFrame
-        cardView.layer.cornerRadius = min(28, cardFrame.height * 0.18)
+        // 卡片铺满整个悬浮窗（PiP 窗口自带圆角裁剪，无需自己留边距）
+        cardView.frame = bounds
+        cardView.layer.cornerRadius = 0
 
-        // 字体随卡片尺寸缩放（基准 240x160 下的 size*2.5 / size*2）
-        let scale = min(cardFrame.width / 240.0, cardFrame.height / 160.0)
+        // 字体随窗口尺寸缩放（基准 240x160 下的 size*2.5 / size*2）
+        let scale = min(boundsW / 240.0, boundsH / 160.0)
         numberLabel.font = .systemFont(ofSize: CGFloat(s.bpmNumberSize) * 2.5 * scale, weight: .bold)
         bpmLabel.font = .systemFont(ofSize: CGFloat(s.bpmLabelSize) * 2.0 * scale, weight: .medium)
 
         let numberSize = numberLabel.text?.size(withAttributes: [.font: numberLabel.font]) ?? .zero
         let labelSize = bpmLabel.text?.size(withAttributes: [.font: bpmLabel.font]) ?? .zero
         let spacing: CGFloat = 8 * scale
+        // 钳制在窗口宽度内，超出时 adjustsFontSizeToFitWidth 会自动缩小字号
+        let maxTextWidth = boundsW - 16
+        let numberW = min(numberSize.width + 4, maxTextWidth)
+        let labelW = min(labelSize.width + 4, maxTextWidth)
 
-        let cx = cardFrame.midX
-        let cy = cardFrame.midY
+        let cx = boundsW / 2
+        let cy = boundsH / 2
 
         switch s.bpmPosition {
         case 0: // BPM 在数字上方
-            numberLabel.frame = CGRect(x: cx - numberSize.width / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
-            bpmLabel.frame = CGRect(x: cx - labelSize.width / 2, y: numberLabel.frame.minY - labelSize.height - spacing, width: labelSize.width + 4, height: labelSize.height)
+            numberLabel.frame = CGRect(x: cx - numberW / 2, y: cy - numberSize.height / 2, width: numberW, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: cx - labelW / 2, y: numberLabel.frame.minY - labelSize.height - spacing, width: labelW, height: labelSize.height)
         case 1: // BPM 在数字下方
-            numberLabel.frame = CGRect(x: cx - numberSize.width / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
-            bpmLabel.frame = CGRect(x: cx - labelSize.width / 2, y: numberLabel.frame.maxY + spacing, width: labelSize.width + 4, height: labelSize.height)
+            numberLabel.frame = CGRect(x: cx - numberW / 2, y: cy - numberSize.height / 2, width: numberW, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: cx - labelW / 2, y: numberLabel.frame.maxY + spacing, width: labelW, height: labelSize.height)
         case 2: // BPM 在数字左侧
-            let totalW = numberSize.width + spacing + labelSize.width
-            bpmLabel.frame = CGRect(x: cx - totalW / 2, y: cy - labelSize.height / 2, width: labelSize.width + 4, height: labelSize.height)
-            numberLabel.frame = CGRect(x: bpmLabel.frame.maxX + spacing, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
+            let totalW = numberW + spacing + labelW
+            bpmLabel.frame = CGRect(x: cx - totalW / 2, y: cy - labelSize.height / 2, width: labelW, height: labelSize.height)
+            numberLabel.frame = CGRect(x: bpmLabel.frame.maxX + spacing, y: cy - numberSize.height / 2, width: numberW, height: numberSize.height)
         case 3: // BPM 在数字右侧
-            let totalW = numberSize.width + spacing + labelSize.width
-            numberLabel.frame = CGRect(x: cx - totalW / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
-            bpmLabel.frame = CGRect(x: numberLabel.frame.maxX + spacing, y: cy - labelSize.height / 2, width: labelSize.width + 4, height: labelSize.height)
+            let totalW = numberW + spacing + labelW
+            numberLabel.frame = CGRect(x: cx - totalW / 2, y: cy - numberSize.height / 2, width: numberW, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: numberLabel.frame.maxX + spacing, y: cy - labelSize.height / 2, width: labelW, height: labelSize.height)
         default:
-            numberLabel.frame = CGRect(x: cx - numberSize.width / 2, y: cy - numberSize.height / 2, width: numberSize.width + 4, height: numberSize.height)
-            bpmLabel.frame = CGRect(x: cx - labelSize.width / 2, y: numberLabel.frame.maxY + spacing, width: labelSize.width + 4, height: labelSize.height)
+            numberLabel.frame = CGRect(x: cx - numberW / 2, y: cy - numberSize.height / 2, width: numberW, height: numberSize.height)
+            bpmLabel.frame = CGRect(x: cx - labelW / 2, y: numberLabel.frame.maxY + spacing, width: labelW, height: labelSize.height)
         }
     }
 }
