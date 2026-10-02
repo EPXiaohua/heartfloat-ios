@@ -11,7 +11,7 @@ class SettingsManager: ObservableObject {
     @AppStorage("bpmLabelSize") var bpmLabelSize: Double = 14
     @AppStorage("bpmLabelColorHex") var bpmLabelColorHex: String = "FFFFFF"
     @AppStorage("bpmPosition") var bpmPosition: Int = 3
-    @AppStorage("backgroundOpacity") var backgroundOpacity: Double = 80
+    @AppStorage("backgroundBrightness") var backgroundBrightness: Double = 0
     @AppStorage("httpPushEnabled") var httpPushEnabled: Bool = false
     @AppStorage("httpPushPort") var httpPushPort: Int = 8080
 

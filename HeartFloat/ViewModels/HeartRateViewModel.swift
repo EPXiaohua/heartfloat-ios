@@ -364,7 +364,9 @@ final class HeartRatePipView: UIView {
         let labelColor = UIColor(Color(hex: settings.bpmLabelColorHex))
         numberLabel.textColor = numberColor
         bpmLabel.textColor = labelColor
-        cardView.alpha = max(0.1, min(1.0, CGFloat(settings.backgroundOpacity) / 100.0))
+        // 背景亮度：0 = 纯黑，100 = 纯白
+        let brightness = max(0, min(100, settings.backgroundBrightness)) / 100.0
+        cardView.backgroundColor = UIColor(white: CGFloat(brightness), alpha: 1)
         setNeedsLayout()
         layoutIfNeeded()
     }

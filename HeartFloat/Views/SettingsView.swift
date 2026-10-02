@@ -64,7 +64,7 @@ struct SettingsView: View {
 
             ZStack {
                 RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.black.opacity(settings.backgroundOpacity / 100))
+                    .fill(Color(white: settings.backgroundBrightness / 100))
                     .frame(height: 80)
 
                 HStack(spacing: settings.bpmPosition == 0 || settings.bpmPosition == 1 ? 0 : 4) {
@@ -165,11 +165,17 @@ struct SettingsView: View {
                 .font(.system(size: 16, weight: .bold))
 
             HStack {
-                Text("背景不透明度")
+                Text("背景亮度")
                     .foregroundColor(.secondary)
-                Slider(value: $settings.backgroundOpacity, in: 0...100, step: 1)
-                Text("\(Int(settings.backgroundOpacity))%")
-                    .frame(width: 50)
+                Text("黑")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Slider(value: $settings.backgroundBrightness, in: 0...100, step: 1)
+                Text("白")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Text("\(Int(settings.backgroundBrightness))")
+                    .frame(width: 40)
             }
         }
         .padding()
