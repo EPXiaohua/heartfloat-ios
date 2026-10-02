@@ -12,12 +12,12 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var logMessages: [String] = []
     @Published var isPipActive: Bool = false
     @Published var showConnectionOverlay: Bool = false
-    /// 最近 60 秒心率曲线（固定长度，供 Canvas 逐帧绘制）
+    /// 最近 60 秒心率曲线目标值（固定长度）
     @Published var heartRateHistory: [Double] = Array(repeating: 0, count: 60)
-    /// 上一次采样前的历史快照（供形变动画插值：旧形态 → 新形态）
-    var previousHistory: [Double] = Array(repeating: 0, count: 60)
-    /// 最近一次心率采样时间（供形变动画进度插值）
-    var lastSampleAt: Date = .distantPast
+    /// 曲线当前显示值：每帧向 heartRateHistory 指数趋近，保证平滑无突变
+    var displayHistory: [Double] = Array(repeating: 0, count: 60)
+    /// 上一帧时间（计算指数趋近步长）
+    var lastFrameAt: Date = .distantPast
 
     private let bleService = BleService.shared
     private let httpServer = HttpServerManager.shared
@@ -48,11 +48,9 @@ class HeartRateViewModel: NSObject, ObservableObject {
             .sink { [weak self] rate in
                 guard let self = self else { return }
                 self.httpServer.updateHeartRate(rate, contact: self.isContact)
-                // 曲线历史每秒都推进，并保存旧快照供形变动画（旧形态 → 新形态平滑过渡）
-                self.previousHistory = self.heartRateHistory
+                // 目标曲线每秒推进一格；显示曲线由 Canvas 每帧指数趋近，天然平滑
                 self.heartRateHistory.removeFirst()
                 self.heartRateHistory.append(Double(rate))
-                self.lastSampleAt = Date()
                 // 数字大字 / 画中画仅在值变化时刷新，避免无效重绘
                 guard rate != self.heartRate else { return }
                 self.heartRate = rate

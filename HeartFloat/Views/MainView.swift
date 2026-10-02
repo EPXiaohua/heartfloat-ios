@@ -272,67 +272,60 @@ struct HeartRateChartView: View {
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, now: Date) {
-        let curr = viewModel.heartRateHistory
-        let prev = viewModel.previousHistory
-        let validValues = curr.filter { $0 > 0 }
+        let target = viewModel.heartRateHistory
+        let validTarget = target.filter { $0 > 0 }
 
         // 绘图区（左侧留 BPM 标签、底部留时间标签）
         let plot = CGRect(x: 34, y: 6, width: size.width - 40, height: size.height - 24)
 
         // 无数据：占位提示
-        if validValues.isEmpty {
+        if validTarget.isEmpty {
             let hint = viewModel.connectionState == .connected ? "正在采集心率数据..." : "连接手环后显示心率曲线"
             context.draw(
                 Text(hint).font(.system(size: 13)).foregroundColor(Color(.tertiaryLabel)),
                 at: CGPoint(x: size.width / 2, y: size.height / 2)
             )
-            drawGrid(plot: plot, in: &context, lo: 60, hi: 100)
+            drawGrid(plot: plot, in: &context, lo: 50, hi: 90)
             return
         }
 
-        // 形变动画：新样本到来后 0.6 秒内，曲线从旧形态逐点插值到新形态（cubic ease-out，先快后慢）
-        let elapsed = now.timeIntervalSince(viewModel.lastSampleAt)
-        let t = min(max(elapsed / 0.6, 0), 1)
-        let progress = 1 - pow(1 - t, 3)
-
-        // 逐点插值显示值：旧形态 prev[i] → 新形态 curr[i]
-        // 值域范围也随插值自动平滑缩放（读到的心率 vs 整体范围做对比）
-        let display: [Double]
-        if prev.count == curr.count, progress < 1 {
-            display = zip(prev, curr).map { $0 + ($1 - $0) * progress }
-        } else {
-            display = curr
+        // 指数趋近平滑：显示曲线每帧向目标曲线连续追赶（时间常数 0.22s，先快后慢）。
+        // 与采样频率无关、无快照重置、无取整跳变，从根源上消除抽动。
+        let dt = min(max(now.timeIntervalSince(viewModel.lastFrameAt), 0), 0.1)
+        viewModel.lastFrameAt = now
+        let k = 1 - exp(-dt / 0.22)
+        for i in 0..<viewModel.displayHistory.count {
+            viewModel.displayHistory[i] += (target[i] - viewModel.displayHistory[i]) * k
         }
+        let display = viewModel.displayHistory
 
-        // 值范围（取整到 10，幅度小时扩到 20）
-        let displayValid = display.filter { $0 > 0 }
-        var hi = ceil((displayValid.max() ?? 100) / 10) * 10
-        var lo = floor((displayValid.min() ?? 60) / 10) * 10
-        if hi - lo < 20 {
-            let mid = (hi + lo) / 2
-            lo = mid - 10
-            hi = mid + 10
-        }
+        // 连续值域：随显示值连续伸缩（不取整，杜绝网格/曲线跳变），上下各留余量
+        let displayValid = display.filter { $0 > 0.05 }
+        let vmin = displayValid.min() ?? 60
+        let vmax = displayValid.max() ?? 100
+        let mid = (vmin + vmax) / 2
+        let span = max(vmax - vmin, 20) * 1.2 + 4
+        let lo = mid - span / 2
+        let hi = mid + span / 2
 
         drawGrid(plot: plot, in: &context, lo: lo, hi: hi)
 
         // 值 → y 坐标
         func yFor(_ v: Double) -> CGFloat {
-            let ratio = min(max((v - lo) / (hi - lo), 0), 1)
+            let ratio = min(max((v - lo) / span, 0), 1)
             return plot.maxY - CGFloat(ratio) * plot.height
         }
 
         // 剪裁绘图区
         context.clip(to: Path(plot))
 
-        // 折线：直线段连接（心电图风格）。时间轴从左到右为"现在 → -60s"，点位置固定，
-        // 曲线仅通过形变动画响应新数据（不做水平滚动）
+        // 折线：直线段连接（心电图风格）。时间轴从左到右为"现在 → -60s"，点位置固定
         var line = Path()
         let n = display.count
-        for i in 0..<n where display[i] > 0 {
+        for i in 0..<n where display[i] > 0.05 {
             let x = plot.minX + CGFloat(Double(n - 1 - i) / Double(n - 1)) * plot.width
             let p = CGPoint(x: x, y: yFor(display[i]))
-            if i == 0 || display[i - 1] <= 0 {
+            if i == 0 || display[i - 1] <= 0.05 {
                 line.move(to: p)
             } else {
                 line.addLine(to: p)
@@ -354,12 +347,12 @@ struct HeartRateChartView: View {
         context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
         // 当前心率圆点：锚定左端，按心率节拍向外扩散
-        if let headValue = display.first, headValue > 0 {
+        if let headValue = display.first, headValue > 0.05 {
             let head = CGPoint(x: plot.minX, y: yFor(headValue))
 
             let bpm = max(viewModel.heartRate, 40)
             let beatInterval = 60.0 / Double(bpm)
-            let phase = now.timeIntervalSince(viewModel.lastSampleAt).truncatingRemainder(dividingBy: beatInterval) / beatInterval
+            let phase = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: beatInterval) / beatInterval
             let expand = 1 - phase // 1 → 0 向外扩散衰减
 
             context.fill(Path(ellipseIn: CGRect(x: head.x - 4, y: head.y - 4, width: 8, height: 8)), with: .color(themeColor))
@@ -376,16 +369,16 @@ struct HeartRateChartView: View {
         let labelColor = Color(.tertiaryLabel)
         let gridColor = Color(.systemGray5)
 
-        // 水平网格：上 / 中 / 下 三条，标注 BPM 值
+        // 水平网格：上 / 中 / 下 三条，标注 BPM 值（连续值域，四舍五入显示）
         let gridValues: [Double] = [hi, (hi + lo) / 2, lo]
         for v in gridValues {
-            let y = plot.maxY - CGFloat((v - lo) / (hi - lo)) * plot.height
+            let y = plot.maxY - CGFloat((v - lo) / max(hi - lo, 1)) * plot.height
             var grid = Path()
             grid.move(to: CGPoint(x: plot.minX, y: y))
             grid.addLine(to: CGPoint(x: plot.maxX, y: y))
             context.stroke(grid, with: .color(gridColor), lineWidth: 0.8)
             context.draw(
-                Text("\(Int(v))").font(.system(size: 9, design: .monospaced)).foregroundColor(labelColor),
+                Text("\(Int(v.rounded()))").font(.system(size: 9, design: .monospaced)).foregroundColor(labelColor),
                 at: CGPoint(x: plot.minX - 14, y: y)
             )
         }
