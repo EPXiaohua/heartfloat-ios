@@ -297,7 +297,7 @@ struct HeartRateChartView: View {
         let targetLo = mid - span / 2
         let targetHi = mid + span / 2
 
-        // 值域指数趋近：范围变化时整条曲线平滑伸缩（唯一动画来源，杜绝跳动）
+        // 值域指数趋近：范围变化时整条曲线平滑伸缩（唯一的全局动画，杜绝跳动）
         let dt = min(max(now.timeIntervalSince(viewModel.lastFrameAt), 0), 0.1)
         viewModel.lastFrameAt = now
         let k = 1 - exp(-dt / 0.35)
@@ -325,18 +325,31 @@ struct HeartRateChartView: View {
         // 剪裁绘图区
         context.clip(to: Path(plot))
 
-        // 折线：直线段连接（心电图风格），直接绘制数据本身。
-        // 时间轴从左到右为"现在 → -60s"，每秒整体左移一格（60 格窗口中位移极小，视觉稳定）
+        // 末端显示值：指数趋近最新心率，圆点/末段平滑滑动（心率变化时"加载一下"）
+        let lastRaw = values.last ?? 0
+        if let dl = viewModel.displayLast {
+            viewModel.displayLast = dl + (lastRaw - dl) * k
+        } else {
+            viewModel.displayLast = lastRaw
+        }
+        let headValue = viewModel.displayLast ?? lastRaw
+
+        // 折线：直线段连接（心电图风格）。时间轴从左到右为"-60s → 现在"，
+        // 最新点在右端，新心率到来时波形整体左移一格，末端平滑滑向新值
         var line = Path()
         let n = values.count
-        for i in 0..<n where values[i] > 0.05 {
-            let x = plot.minX + CGFloat(Double(n - 1 - i) / Double(n - 1)) * plot.width
+        for i in 0..<(n - 1) where values[i] > 0.05 {
+            let x = plot.minX + CGFloat(Double(i) / Double(n - 1)) * plot.width
             let p = CGPoint(x: x, y: yFor(values[i]))
             if i == 0 || values[i - 1] <= 0.05 {
                 line.move(to: p)
             } else {
                 line.addLine(to: p)
             }
+        }
+        // 最后一段：终点用平滑末端值，与圆点位置保持一致
+        if n >= 2, values[n - 2] > 0.05, lastRaw > 0.05 {
+            line.addLine(to: CGPoint(x: plot.maxX, y: yFor(headValue)))
         }
 
         // 渐变填充
@@ -353,9 +366,9 @@ struct HeartRateChartView: View {
         // 折线描边
         context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
-        // 当前心率圆点：锚定左端，按心率节拍向外扩散
-        if let headValue = values.last, headValue > 0.05 {
-            let head = CGPoint(x: plot.minX, y: yFor(headValue))
+        // 当前心率圆点：锚定右端（"现在"），按心率节拍向外扩散
+        if headValue > 0.05 {
+            let head = CGPoint(x: plot.maxX, y: yFor(headValue))
 
             let bpm = max(viewModel.heartRate, 40)
             let beatInterval = 60.0 / Double(bpm)
@@ -390,8 +403,8 @@ struct HeartRateChartView: View {
             )
         }
 
-        // 垂直网格：现在（左）→ -60s（右）
-        let timeMarks: [(String, CGFloat)] = [("现在", 0), ("-20s", 1.0 / 3.0), ("-40s", 2.0 / 3.0), ("-60s", 1)]
+        // 垂直网格：-60s（左）→ 现在（右）
+        let timeMarks: [(String, CGFloat)] = [("-60s", 0), ("-40s", 1.0 / 3.0), ("-20s", 2.0 / 3.0), ("现在", 1)]
         for (label, frac) in timeMarks {
             let x = plot.minX + frac * plot.width
             var grid = Path()
