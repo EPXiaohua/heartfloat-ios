@@ -238,17 +238,19 @@ struct PulsingHeartIcon: View {
     private func startLoop(token myToken: UUID) {
         guard active, bpm >= 30 else { return }
         let interval = 60.0 / Double(max(bpm, 30))
-        DispatchQueue.main.asyncAfter(deadline: .now() + interval) { [token = beatToken] in
-            guard token == myToken else { return }
+        let capturedToken = beatToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
+            guard capturedToken == myToken else { return }
             beat(token: myToken)
         }
     }
 
     private func beat(token myToken: UUID) {
-        guard token == beatToken else { return }
+        guard myToken == beatToken else { return }
         withAnimation(.easeOut(duration: 0.1)) { beating = true }
+        let capturedToken = beatToken
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            guard token == myToken else { return }
+            guard capturedToken == myToken else { return }
             withAnimation(.easeInOut(duration: 0.3)) { beating = false }
             startLoop(token: myToken)
         }
