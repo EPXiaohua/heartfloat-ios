@@ -14,11 +14,14 @@ class BleService: NSObject, ObservableObject {
         case disconnected
         case connecting
         case connected
+        case failed
     }
 
     private var centralManager: CBCentralManager?
     private var connectedPeripheral: CBPeripheral?
     private var heartRateCharacteristic: CBCharacteristic?
+    private var scanTimeoutWork: DispatchWorkItem?
+    private var isManualStop = false
 
     private let heartRateServiceUUID = CBUUID(string: "180D")
     private let heartRateMeasurementUUID = CBUUID(string: "2A37")
@@ -45,6 +48,7 @@ class BleService: NSObject, ObservableObject {
     func startScan() {
         guard let central = centralManager, central.state == .poweredOn else {
             addLog("蓝牙未开启或不可用")
+            connectionState = .failed
             return
         }
 
@@ -53,12 +57,31 @@ class BleService: NSObject, ObservableObject {
         addLog("开始扫描BLE设备...")
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
-            self?.stopScan()
-            if self?.connectionState == .connecting {
-                self?.connectionState = .disconnected
-                self?.addLog("扫描超时，未找到设备")
+        scanTimeoutWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.connectionState == .connecting else { return }
+            self.centralManager?.stopScan()
+            self.connectionState = .failed
+            self.addLog("扫描超时，未找到手环")
+        }
+        scanTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: work)
+    }
+
+    /// 取消连接流程（扫描中或连接中），不产生自动重连
+    func cancelScan() {
+        scanTimeoutWork?.cancel()
+        centralManager?.stopScan()
+        if connectionState != .connected {
+            if let peripheral = connectedPeripheral {
+                peripheral.delegate = nil
+                centralManager?.cancelPeripheralConnection(peripheral)
             }
+            connectedPeripheral = nil
+            heartRateCharacteristic = nil
+            isManualStop = true
+            connectionState = .disconnected
+            addLog("已取消连接")
         }
     }
 
@@ -67,6 +90,8 @@ class BleService: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        isManualStop = true
+        scanTimeoutWork?.cancel()
         if let peripheral = connectedPeripheral {
             peripheral.delegate = nil
             centralManager?.cancelPeripheralConnection(peripheral)
@@ -187,6 +212,12 @@ extension BleService: CBCentralManagerDelegate {
         connectedPeripheral = nil
         heartRateCharacteristic = nil
 
+        // 用户主动断开时不自动重连
+        if isManualStop {
+            isManualStop = false
+            return
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             if self?.connectionState == .disconnected {
                 self?.addLog("尝试重新连接...")
@@ -197,7 +228,7 @@ extension BleService: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         addLog("连接失败: \(error?.localizedDescription ?? "未知错误")")
-        connectionState = .disconnected
+        connectionState = .failed
     }
 }
 

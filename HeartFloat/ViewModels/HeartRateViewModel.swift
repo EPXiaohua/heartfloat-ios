@@ -11,8 +11,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var isContact: Bool = false
     @Published var logMessages: [String] = []
     @Published var isPipActive: Bool = false
-    @Published var isLogPaused: Bool = false
-    var pausedLogSnapshot: String?
+    @Published var showConnectionOverlay: Bool = false
 
     private let bleService = BleService.shared
     private let httpServer = HttpServerManager.shared
@@ -50,7 +49,16 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
         bleService.$connectionState
             .receive(on: DispatchQueue.main)
-            .assign(to: &$connectionState)
+            .sink { [weak self] state in
+                self?.connectionState = state
+                // 连接成功后展示勾动画片刻再自动关闭弹窗
+                if state == .connected {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+                        self?.showConnectionOverlay = false
+                    }
+                }
+            }
+            .store(in: &cancellables)
 
         bleService.$isContact
             .receive(on: DispatchQueue.main)
@@ -71,7 +79,13 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
 
     func connect() {
+        showConnectionOverlay = true
         bleService.startScan()
+    }
+
+    func cancelConnect() {
+        bleService.cancelScan()
+        showConnectionOverlay = false
     }
 
     func disconnect() {
@@ -249,29 +263,6 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
 
     // MARK: - 日志
-
-    func clearLogs() {
-        logMessages.removeAll()
-        addLog("日志已清空")
-    }
-
-    func copyLogs() {
-        let logText = logMessages.joined(separator: "\n")
-        UIPasteboard.general.string = logText
-        addLog("日志已复制到剪贴板")
-    }
-
-    func toggleLogPause() {
-        if isLogPaused {
-            isLogPaused = false
-            pausedLogSnapshot = nil
-            addLog("日志已恢复")
-        } else {
-            isLogPaused = true
-            pausedLogSnapshot = logMessages.suffix(100).joined(separator: "\n")
-            addLog("日志已暂停")
-        }
-    }
 
     private func addLog(_ message: String) {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)

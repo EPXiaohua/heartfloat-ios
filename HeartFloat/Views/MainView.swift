@@ -5,25 +5,32 @@ struct MainView: View {
     @EnvironmentObject var settings: SettingsManager
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 16) {
-                titleSection
+        ZStack {
+            NavigationView {
+                VStack(spacing: 16) {
+                    titleSection
 
-                heartRateDisplay
+                    heartRateDisplay
 
-                statusSection
+                    statusSection
 
-                buttonSection
+                    buttonSection
 
-                logSection
+                    Spacer()
 
-                Spacer()
-
-                hintSection
+                    hintSection
+                }
+                .padding()
+                .navigationBarHidden(true)
             }
-            .padding()
-            .navigationBarHidden(true)
+
+            if viewModel.showConnectionOverlay {
+                ConnectionOverlayView(viewModel: viewModel)
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.showConnectionOverlay)
     }
 
     private var titleSection: some View {
@@ -58,6 +65,8 @@ struct MainView: View {
             return "正在连接..."
         case .connected:
             return "已连接"
+        case .failed:
+            return "连接失败"
         }
     }
 
@@ -69,6 +78,8 @@ struct MainView: View {
             return .orange
         case .connected:
             return .green
+        case .failed:
+            return .red
         }
     }
 
@@ -78,13 +89,13 @@ struct MainView: View {
                 Button(action: {
                     if viewModel.connectionState == .connected {
                         viewModel.disconnect()
-                    } else {
+                    } else if viewModel.connectionState != .connecting {
                         viewModel.connect()
                     }
                 }) {
                     HStack {
                         Image(systemName: viewModel.connectionState == .connected ? "link.badge.plus" : "antenna.radiowaves.left.and.right")
-                        Text(viewModel.connectionState == .connected ? "断开连接" : (viewModel.connectionState == .connecting ? "取消连接" : "连接手环"))
+                        Text(viewModel.connectionState == .connected ? "断开连接" : "连接手环")
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -92,6 +103,8 @@ struct MainView: View {
                     .foregroundColor(.white)
                     .cornerRadius(10)
                 }
+                .disabled(viewModel.connectionState == .connecting)
+                .opacity(viewModel.connectionState == .connecting ? 0.5 : 1)
 
                 Button(action: {
                     viewModel.togglePip()
@@ -125,69 +138,129 @@ struct MainView: View {
         .padding(.top, 8)
     }
 
-    private var logSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("日志终端")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button(viewModel.isLogPaused ? "继续" : "暂停") {
-                    viewModel.toggleLogPause()
-                }
-                .font(.system(size: 12))
-                .foregroundColor(viewModel.isLogPaused ? .green : .orange)
-
-                Button("复制") {
-                    viewModel.copyLogs()
-                }
-                .font(.system(size: 12))
-                .foregroundColor(.blue)
-
-                Button("清空") {
-                    viewModel.clearLogs()
-                }
-                .font(.system(size: 12))
-                .foregroundColor(.red)
-            }
-
-            ScrollView {
-                ScrollViewReader { proxy in
-                    Text(displayedLogText)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(Color(white: 0.33))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .id("logBottom")
-                        .onChange(of: viewModel.logMessages.count) { _ in
-                            if !viewModel.isLogPaused {
-                                withAnimation(.linear(duration: 0.15)) {
-                                    proxy.scrollTo("logBottom", anchor: .bottom)
-                                }
-                            }
-                        }
-                }
-            }
-            .frame(height: 150)
-            .background(Color(white: 0.94))
-            .cornerRadius(8)
-        }
-        .padding(.top, 16)
-    }
-
-    private var displayedLogText: String {
-        if viewModel.isLogPaused, let pausedSnapshot = viewModel.pausedLogSnapshot {
-            return pausedSnapshot
-        }
-        let recent = viewModel.logMessages.suffix(100)
-        return recent.joined(separator: "\n")
-    }
-
     private var hintSection: some View {
-        Text("提示：请先使用小米运动健康App配对手环")
+        Text("提示：请先在手环的设置中开启心率广播（不同机型开启路径略有差异）")
             .font(.system(size: 11))
             .foregroundColor(.secondary)
             .multilineTextAlignment(.center)
+    }
+}
+
+// MARK: - 连接弹窗（毛玻璃 + 日志 + 结果动画 + 取消）
+
+struct ConnectionOverlayView: View {
+    @ObservedObject var viewModel: HeartRateViewModel
+    @State private var resultIconShown = false
+
+    private var isFailed: Bool { viewModel.connectionState == .failed }
+    private var isConnected: Bool { viewModel.connectionState == .connected }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { } // 阻断点击穿透
+
+            VStack(spacing: 14) {
+                statusIcon
+
+                Text(statusTitle)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+
+                logList
+
+                cancelButton
+            }
+            .padding(22)
+            .frame(width: 310)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+        }
+        .onChange(of: viewModel.connectionState) { state in
+            if state == .connected || state == .failed {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                    resultIconShown = true
+                }
+            } else {
+                resultIconShown = false
+            }
+        }
+    }
+
+    private var statusTitle: String {
+        if isConnected { return "连接成功" }
+        if isFailed { return "连接失败" }
+        return "正在搜索手环..."
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        if isConnected {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 54))
+                .foregroundColor(.green)
+                .scaleEffect(resultIconShown ? 1.0 : 0.2)
+                .opacity(resultIconShown ? 1.0 : 0.0)
+        } else if isFailed {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 54))
+                .foregroundColor(.red)
+                .scaleEffect(resultIconShown ? 1.0 : 0.2)
+                .opacity(resultIconShown ? 1.0 : 0.0)
+        } else {
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 4)
+                    .frame(width: 54, height: 54)
+                ProgressView()
+                    .scaleEffect(1.3)
+            }
+        }
+    }
+
+    private var logList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    // 最早的在上、最新的在下
+                    ForEach(Array(viewModel.logMessages.suffix(30).enumerated()), id: \.offset) { _, message in
+                        Text(message)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Color.clear.frame(height: 1).id("overlayLogBottom")
+                }
+                .padding(10)
+            }
+            .frame(height: 130)
+            .background(Color(.systemGray6).opacity(0.75))
+            .cornerRadius(12)
+            .onChange(of: viewModel.logMessages.count) { _ in
+                withAnimation(.linear(duration: 0.12)) {
+                    proxy.scrollTo("overlayLogBottom", anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    private var cancelButton: some View {
+        Button(action: {
+            if isFailed {
+                viewModel.showConnectionOverlay = false
+            } else {
+                viewModel.cancelConnect()
+            }
+        }) {
+            Text(isFailed ? "关闭" : "取消连接")
+                .font(.system(size: 15, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.systemGray5))
+                .foregroundColor(.primary)
+                .cornerRadius(12)
+        }
     }
 }
 

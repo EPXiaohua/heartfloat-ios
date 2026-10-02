@@ -67,21 +67,39 @@ struct SettingsView: View {
                     .fill(Color(white: settings.backgroundBrightness / 100))
                     .frame(height: 80)
 
-                HStack(spacing: settings.bpmPosition == 0 || settings.bpmPosition == 1 ? 0 : 4) {
-                    if settings.bpmPosition == 0 || settings.bpmPosition == 2 {
-                        Text("BPM")
-                            .font(.system(size: settings.bpmLabelSize))
-                            .foregroundColor(settings.bpmLabelColor)
+                if settings.bpmPosition == 0 || settings.bpmPosition == 1 {
+                    // 纵向排列：BPM 在上 / 下
+                    VStack(spacing: 2) {
+                        if settings.bpmPosition == 0 {
+                            Text("BPM")
+                                .font(.system(size: settings.bpmLabelSize))
+                                .foregroundColor(settings.bpmLabelColor)
+                        }
+                        Text("88")
+                            .font(.system(size: min(settings.bpmNumberSize, 32), weight: .bold))
+                            .foregroundColor(settings.bpmNumberColor)
+                        if settings.bpmPosition == 1 {
+                            Text("BPM")
+                                .font(.system(size: settings.bpmLabelSize))
+                                .foregroundColor(settings.bpmLabelColor)
+                        }
                     }
-
-                    Text("88")
-                        .font(.system(size: settings.bpmNumberSize, weight: .bold))
-                        .foregroundColor(settings.bpmNumberColor)
-
-                    if settings.bpmPosition == 1 || settings.bpmPosition == 3 {
-                        Text("BPM")
-                            .font(.system(size: settings.bpmLabelSize))
-                            .foregroundColor(settings.bpmLabelColor)
+                } else {
+                    // 横向排列：BPM 在左 / 右
+                    HStack(spacing: 4) {
+                        if settings.bpmPosition == 2 {
+                            Text("BPM")
+                                .font(.system(size: settings.bpmLabelSize))
+                                .foregroundColor(settings.bpmLabelColor)
+                        }
+                        Text("88")
+                            .font(.system(size: settings.bpmNumberSize, weight: .bold))
+                            .foregroundColor(settings.bpmNumberColor)
+                        if settings.bpmPosition == 3 {
+                            Text("BPM")
+                                .font(.system(size: settings.bpmLabelSize))
+                                .foregroundColor(settings.bpmLabelColor)
+                        }
                     }
                 }
             }
