@@ -272,14 +272,14 @@ struct HeartRateChartView: View {
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, now: Date) {
-        let target = viewModel.heartRateHistory
-        let validTarget = target.filter { $0 > 0 }
+        let values = viewModel.heartRateHistory
+        let validValues = values.filter { $0 > 0.05 }
 
         // 绘图区（左侧留 BPM 标签、底部留时间标签）
         let plot = CGRect(x: 34, y: 6, width: size.width - 40, height: size.height - 24)
 
         // 无数据：占位提示
-        if validTarget.isEmpty {
+        if validValues.isEmpty {
             let hint = viewModel.connectionState == .connected ? "正在采集心率数据..." : "连接手环后显示心率曲线"
             context.draw(
                 Text(hint).font(.system(size: 13)).foregroundColor(Color(.tertiaryLabel)),
@@ -289,43 +289,50 @@ struct HeartRateChartView: View {
             return
         }
 
-        // 指数趋近平滑：显示曲线每帧向目标曲线连续追赶（时间常数 0.22s，先快后慢）。
-        // 与采样频率无关、无快照重置、无取整跳变，从根源上消除抽动。
-        let dt = min(max(now.timeIntervalSince(viewModel.lastFrameAt), 0), 0.1)
-        viewModel.lastFrameAt = now
-        let k = 1 - exp(-dt / 0.22)
-        for i in 0..<viewModel.displayHistory.count {
-            viewModel.displayHistory[i] += (target[i] - viewModel.displayHistory[i]) * k
-        }
-        let display = viewModel.displayHistory
-
-        // 连续值域：随显示值连续伸缩（不取整，杜绝网格/曲线跳变），上下各留余量
-        let displayValid = display.filter { $0 > 0.05 }
-        let vmin = displayValid.min() ?? 60
-        let vmax = displayValid.max() ?? 100
+        // 值域目标：由当前数据范围决定（当前心率 vs 整体范围做对比）
+        let vmin = validValues.min() ?? 60
+        let vmax = validValues.max() ?? 100
         let mid = (vmin + vmax) / 2
         let span = max(vmax - vmin, 20) * 1.2 + 4
-        let lo = mid - span / 2
-        let hi = mid + span / 2
+        let targetLo = mid - span / 2
+        let targetHi = mid + span / 2
+
+        // 值域指数趋近：范围变化时整条曲线平滑伸缩（唯一动画来源，杜绝跳动）
+        let dt = min(max(now.timeIntervalSince(viewModel.lastFrameAt), 0), 0.1)
+        viewModel.lastFrameAt = now
+        let k = 1 - exp(-dt / 0.35)
+        let lo: Double
+        let hi: Double
+        if let plo = viewModel.displayLo, let phi = viewModel.displayHi {
+            lo = plo + (targetLo - plo) * k
+            hi = phi + (targetHi - phi) * k
+        } else {
+            lo = targetLo
+            hi = targetHi
+        }
+        viewModel.displayLo = lo
+        viewModel.displayHi = hi
 
         drawGrid(plot: plot, in: &context, lo: lo, hi: hi)
 
-        // 值 → y 坐标
+        // 值 → y 坐标。不把超界点压平到边缘（压平会造成平顶/断崖），
+        // 越界段由绘图区剪裁自然裁掉，视觉保持连续
         func yFor(_ v: Double) -> CGFloat {
-            let ratio = min(max((v - lo) / span, 0), 1)
+            let ratio = min(max((v - lo) / max(hi - lo, 1), -0.2), 1.2)
             return plot.maxY - CGFloat(ratio) * plot.height
         }
 
         // 剪裁绘图区
         context.clip(to: Path(plot))
 
-        // 折线：直线段连接（心电图风格）。时间轴从左到右为"现在 → -60s"，点位置固定
+        // 折线：直线段连接（心电图风格），直接绘制数据本身。
+        // 时间轴从左到右为"现在 → -60s"，每秒整体左移一格（60 格窗口中位移极小，视觉稳定）
         var line = Path()
-        let n = display.count
-        for i in 0..<n where display[i] > 0.05 {
+        let n = values.count
+        for i in 0..<n where values[i] > 0.05 {
             let x = plot.minX + CGFloat(Double(n - 1 - i) / Double(n - 1)) * plot.width
-            let p = CGPoint(x: x, y: yFor(display[i]))
-            if i == 0 || display[i - 1] <= 0.05 {
+            let p = CGPoint(x: x, y: yFor(values[i]))
+            if i == 0 || values[i - 1] <= 0.05 {
                 line.move(to: p)
             } else {
                 line.addLine(to: p)
@@ -347,7 +354,7 @@ struct HeartRateChartView: View {
         context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
         // 当前心率圆点：锚定左端，按心率节拍向外扩散
-        if let headValue = display.first, headValue > 0.05 {
+        if let headValue = values.last, headValue > 0.05 {
             let head = CGPoint(x: plot.minX, y: yFor(headValue))
 
             let bpm = max(viewModel.heartRate, 40)

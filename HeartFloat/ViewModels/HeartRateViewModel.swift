@@ -12,11 +12,12 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var logMessages: [String] = []
     @Published var isPipActive: Bool = false
     @Published var showConnectionOverlay: Bool = false
-    /// 最近 60 秒心率曲线目标值（固定长度）
+    /// 最近 60 秒心率曲线（固定长度，每秒左移一格）
     @Published var heartRateHistory: [Double] = Array(repeating: 0, count: 60)
-    /// 曲线当前显示值：每帧向 heartRateHistory 指数趋近，保证平滑无突变
-    var displayHistory: [Double] = Array(repeating: 0, count: 60)
-    /// 上一帧时间（计算指数趋近步长）
+    /// 值域显示范围（指数趋近缓存）：当前心率 vs 整体范围做平滑对比缩放
+    var displayLo: Double?
+    var displayHi: Double?
+    /// 上一帧时间（计算值域趋近步长）
     var lastFrameAt: Date = .distantPast
 
     private let bleService = BleService.shared
