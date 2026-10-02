@@ -12,13 +12,14 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var logMessages: [String] = []
     @Published var isPipActive: Bool = false
     @Published var showConnectionOverlay: Bool = false
-    /// 最近 60 秒心率曲线（固定长度，仅在心率变化时推进一格）
-    @Published var heartRateHistory: [Double] = Array(repeating: 0, count: 60)
+    /// 心率采样点（时间戳 + 值）：每次采样无条件追加，曲线按绝对时间轴绘制，
+    /// 视口跟随最新点，同值采样表现为水平线平移（形态不变），值变化才出现形态变化
+    var heartRateSamples: [(Date, Double)] = []
+    /// 最近一次采样时间（视口基准）
+    var lastSampleAt: Date = .distantPast
     /// 值域显示范围（指数趋近缓存）：当前心率 vs 整体范围做平滑对比缩放
     var displayLo: Double?
     var displayHi: Double?
-    /// 曲线末端显示值（指数趋近）：新心率到来时圆点平滑滑动过去
-    var displayLast: Double?
     /// 上一帧时间（计算趋近步长）
     var lastFrameAt: Date = .distantPast
 
@@ -51,12 +52,18 @@ class HeartRateViewModel: NSObject, ObservableObject {
             .sink { [weak self] rate in
                 guard let self = self else { return }
                 self.httpServer.updateHeartRate(rate, contact: self.isContact)
-                // 仅在心率变化时推进曲线（不变则完全静止）
+
+                // 每次采样无条件记录（含相同值），并裁掉窗口外的旧点
+                let now = Date()
+                self.heartRateSamples.append((now, Double(rate)))
+                while let first = self.heartRateSamples.first, now.timeIntervalSince(first.0) > 65 {
+                    self.heartRateSamples.removeFirst()
+                }
+                self.lastSampleAt = now
+
+                // 数字大字 / 画中画仅在值变化时刷新
                 guard rate != self.heartRate else { return }
                 self.heartRate = rate
-                self.heartRateHistory.removeFirst()
-                self.heartRateHistory.append(Double(rate))
-                // 数字大字 / 画中画同步刷新
                 self.pipOverlay?.update(heartRate: rate)
             }
             .store(in: &cancellables)

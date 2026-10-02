@@ -272,8 +272,8 @@ struct HeartRateChartView: View {
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, now: Date) {
-        let values = viewModel.heartRateHistory
-        let validValues = values.filter { $0 > 0.05 }
+        let samples = viewModel.heartRateSamples.filter { now.timeIntervalSince($0.0) <= 61 }
+        let validValues = samples.map { $0.1 }.filter { $0 > 0.05 }
 
         // 绘图区（左侧留 BPM 标签、底部留时间标签）
         let plot = CGRect(x: 34, y: 6, width: size.width - 40, height: size.height - 24)
@@ -289,7 +289,7 @@ struct HeartRateChartView: View {
             return
         }
 
-        // 值域目标：由当前数据范围决定（当前心率 vs 整体范围做对比）
+        // 值域目标：由窗口内数据范围决定（当前心率 vs 整体范围做对比）
         let vmin = validValues.min() ?? 60
         let vmax = validValues.max() ?? 100
         let mid = (vmin + vmax) / 2
@@ -297,7 +297,7 @@ struct HeartRateChartView: View {
         let targetLo = mid - span / 2
         let targetHi = mid + span / 2
 
-        // 值域指数趋近：范围变化时整条曲线平滑伸缩（唯一的全局动画，杜绝跳动）
+        // 值域指数趋近：范围变化时整条曲线平滑伸缩（先快后慢）
         let dt = min(max(now.timeIntervalSince(viewModel.lastFrameAt), 0), 0.1)
         viewModel.lastFrameAt = now
         let k = 1 - exp(-dt / 0.35)
@@ -315,41 +315,35 @@ struct HeartRateChartView: View {
 
         drawGrid(plot: plot, in: &context, lo: lo, hi: hi)
 
-        // 值 → y 坐标。不把超界点压平到边缘（压平会造成平顶/断崖），
-        // 越界段由绘图区剪裁自然裁掉，视觉保持连续
+        // 值 → y 坐标。超界点不压平，由绘图区剪裁自然裁掉，保持连续
         func yFor(_ v: Double) -> CGFloat {
             let ratio = min(max((v - lo) / max(hi - lo, 1), -0.2), 1.2)
             return plot.maxY - CGFloat(ratio) * plot.height
         }
 
+        // 时间 → x 坐标：绝对时间轴，视口右缘跟随最新采样点。
+        // 每次采样视口左移一格：同值时是水平线平移（形态不变、几乎无感），
+        // 值变化时波形形态才发生变化
+        let base = viewModel.lastSampleAt
+        func xFor(_ t: Date) -> CGFloat {
+            let age = base.timeIntervalSince(t) // 距最新采样的秒数
+            return plot.maxX - CGFloat(age / 60.0) * plot.width
+        }
+
         // 剪裁绘图区
         context.clip(to: Path(plot))
 
-        // 末端显示值：指数趋近最新心率，圆点/末段平滑滑动（心率变化时"加载一下"）
-        let lastRaw = values.last ?? 0
-        if let dl = viewModel.displayLast {
-            viewModel.displayLast = dl + (lastRaw - dl) * k
-        } else {
-            viewModel.displayLast = lastRaw
-        }
-        let headValue = viewModel.displayLast ?? lastRaw
-
-        // 折线：直线段连接（心电图风格）。时间轴从左到右为"-60s → 现在"，
-        // 最新点在右端，新心率到来时波形整体左移一格，末端平滑滑向新值
+        // 折线：直线段连接，按每个采样点的时间戳放置
         var line = Path()
-        let n = values.count
-        for i in 0..<(n - 1) where values[i] > 0.05 {
-            let x = plot.minX + CGFloat(Double(i) / Double(n - 1)) * plot.width
-            let p = CGPoint(x: x, y: yFor(values[i]))
-            if i == 0 || values[i - 1] <= 0.05 {
-                line.move(to: p)
-            } else {
+        var started = false
+        for (t, v) in samples where v > 0.05 {
+            let p = CGPoint(x: xFor(t), y: yFor(v))
+            if started {
                 line.addLine(to: p)
+            } else {
+                line.move(to: p)
+                started = true
             }
-        }
-        // 最后一段：终点用平滑末端值，与圆点位置保持一致
-        if n >= 2, values[n - 2] > 0.05, lastRaw > 0.05 {
-            line.addLine(to: CGPoint(x: plot.maxX, y: yFor(headValue)))
         }
 
         // 渐变填充
@@ -366,9 +360,9 @@ struct HeartRateChartView: View {
         // 折线描边
         context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
-        // 当前心率圆点：锚定右端（"现在"），按心率节拍向外扩散
-        if headValue > 0.05 {
-            let head = CGPoint(x: plot.maxX, y: yFor(headValue))
+        // 当前心率圆点：贴右缘（视口跟随最新点），按心率节拍向外扩散
+        if let last = samples.last, last.1 > 0.05 {
+            let head = CGPoint(x: plot.maxX, y: yFor(last.1))
 
             let bpm = max(viewModel.heartRate, 40)
             let beatInterval = 60.0 / Double(bpm)
