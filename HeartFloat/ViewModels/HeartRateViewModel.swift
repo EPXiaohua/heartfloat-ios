@@ -14,7 +14,9 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var showConnectionOverlay: Bool = false
     /// 最近 60 秒心率曲线（固定长度，供 Canvas 逐帧绘制）
     @Published var heartRateHistory: [Double] = Array(repeating: 0, count: 60)
-    /// 最近一次心率采样时间（供滚动动画插值）
+    /// 上一次采样前的历史快照（供形变动画插值：旧形态 → 新形态）
+    var previousHistory: [Double] = Array(repeating: 0, count: 60)
+    /// 最近一次心率采样时间（供形变动画进度插值）
     var lastSampleAt: Date = .distantPast
 
     private let bleService = BleService.shared
@@ -46,14 +48,14 @@ class HeartRateViewModel: NSObject, ObservableObject {
             .sink { [weak self] rate in
                 guard let self = self else { return }
                 self.httpServer.updateHeartRate(rate, contact: self.isContact)
-                // 去重：手环静坐时心率长时间不变，避免每秒无效刷新 UI
-                guard rate != self.heartRate else { return }
-                self.heartRate = rate
-                // 推入曲线历史（固定窗口滚动），并记录采样时间供滚动动画插值
+                // 曲线历史每秒都推进，并保存旧快照供形变动画（旧形态 → 新形态平滑过渡）
+                self.previousHistory = self.heartRateHistory
                 self.heartRateHistory.removeFirst()
                 self.heartRateHistory.append(Double(rate))
                 self.lastSampleAt = Date()
-                // 实时刷新画中画悬浮窗 UI（无需重新生成视频）
+                // 数字大字 / 画中画仅在值变化时刷新，避免无效重绘
+                guard rate != self.heartRate else { return }
+                self.heartRate = rate
                 self.pipOverlay?.update(heartRate: rate)
             }
             .store(in: &cancellables)
