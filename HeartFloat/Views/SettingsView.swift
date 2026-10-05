@@ -438,9 +438,6 @@ struct LandscapeChartView: View {
         }
         .ignoresSafeArea()
     }
-    private var titleColor: Color {
-        colorScheme == .dark ? .white.opacity(0.85) : .primary
-    }
     private var hintColor: Color {
         colorScheme == .dark ? .white.opacity(0.55) : Color.secondary
     }
@@ -484,7 +481,7 @@ struct LandscapeChartView: View {
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 26))
-                            .foregroundColor(titleColor)
+                            .foregroundColor(recordingThemeColor)
                     }
                     Spacer()
                     Text("共 \(recording.samples.count) 点")
