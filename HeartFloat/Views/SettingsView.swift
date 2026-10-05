@@ -408,6 +408,7 @@ struct LandscapeChartView: View {
     let recording: HeartRateRecording
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var viewStartDate: Date?
     @State private var viewSpanSeconds: TimeInterval?
@@ -422,6 +423,27 @@ struct LandscapeChartView: View {
 
     /// 横向缩放时可见的最小时间窗口
     private let minSpan: TimeInterval = 30
+
+    /// 浅色模式跟随应用主题（淡粉渐变），深色模式沉浸黑底
+    private var backgroundColor: some View {
+        Group {
+            if colorScheme == .dark {
+                Color.black
+            } else {
+                LinearGradient(
+                    colors: [Color(red: 1.0, green: 0.96, blue: 0.96), Color(white: 0.98)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            }
+        }
+        .ignoresSafeArea()
+    }
+    private var titleColor: Color {
+        colorScheme == .dark ? .white.opacity(0.85) : .primary
+    }
+    private var hintColor: Color {
+        colorScheme == .dark ? .white.opacity(0.55) : Color.secondary
+    }
 
     private var firstDate: Date {
         recording.samples.first?.t ?? Date()
@@ -454,7 +476,7 @@ struct LandscapeChartView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            backgroundColor
 
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
@@ -464,11 +486,11 @@ struct LandscapeChartView: View {
                             .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
                     } else {
                         Text("单击图表查看对应时间的心率")
-                            .foregroundColor(.white.opacity(0.55))
+                            .foregroundColor(hintColor)
                     }
                     Spacer()
                     Text("共 \(recording.samples.count) 点")
-                        .foregroundColor(.white.opacity(0.55))
+                        .foregroundColor(hintColor)
                 }
                 .font(.system(size: 12, design: .monospaced))
 
@@ -478,7 +500,7 @@ struct LandscapeChartView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "arrow.left.and.right")
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(hintColor)
                     Slider(
                         value: Binding(get: { offsetValue }, set: { setOffset($0) }),
                         in: 0...1
@@ -486,7 +508,7 @@ struct LandscapeChartView: View {
                     .disabled(totalSpan - currentSpan < 1)
                     Text("\(Int(offsetValue * 100))%")
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(hintColor)
                         .frame(width: 34)
                 }
             }
@@ -499,7 +521,7 @@ struct LandscapeChartView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.7))
+                            .foregroundColor(hintColor)
                         Slider(
                             value: Binding(get: { zoomValue }, set: { setZoom($0) }),
                             in: 1...maxZoom
@@ -507,7 +529,7 @@ struct LandscapeChartView: View {
                         .frame(width: 180)
                         Text(String(format: "%.1fx", zoomValue))
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.7))
+                            .foregroundColor(hintColor)
                             .frame(width: 40)
                     }
                     .padding(10)
@@ -523,7 +545,7 @@ struct LandscapeChartView: View {
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 28))
-                            .foregroundColor(.white.opacity(0.85))
+                            .foregroundColor(titleColor)
                     }
                     Spacer()
                 }
