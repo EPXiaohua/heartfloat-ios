@@ -905,6 +905,126 @@ struct ColorPickerSheet: View {
     }
 }
 
+// MARK: - 清理缓存弹窗（自定义毛玻璃：计算 → 确认 → 清理中 → 完成）
+
+struct CacheCleanupOverlayView: View {
+    var onClose: () -> Void
+
+    private enum Phase { case calculating, ready, cleaning, done }
+
+    @State private var phase: Phase = .calculating
+    @State private var cacheBytes: Int64 = 0
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { } // 阻断点击穿透
+
+            VStack(spacing: 14) {
+                statusIcon
+
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.center)
+
+                if phase == .ready {
+                    Text("画中画载体视频缓存、导出临时文件等可再生数据")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                if phase == .ready {
+                    HStack(spacing: 10) {
+                        Button(action: clean) {
+                            Text("清理")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color(red: 1.0, green: 0.42, blue: 0.42))
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                        }
+                        Button(action: onClose) {
+                            Text("取消")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color(.systemGray5))
+                                .foregroundColor(.primary)
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+            .padding(22)
+            .frame(width: 310)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+        }
+        .onAppear(perform: calculate)
+    }
+
+    private var title: String {
+        switch phase {
+        case .calculating: return "正在计算缓存..."
+        case .ready: return "可清理缓存 \(CacheCleaner.sizeText(cacheBytes))"
+        case .cleaning: return "正在清理..."
+        case .done: return "已清理"
+        }
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch phase {
+        case .calculating, .cleaning:
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 4)
+                    .frame(width: 54, height: 54)
+                ProgressView()
+                    .scaleEffect(1.3)
+            }
+        case .ready:
+            Image(systemName: "trash.circle.fill")
+                .font(.system(size: 54))
+                .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 54))
+                .foregroundColor(.green)
+                .transition(.scale.combined(with: .opacity))
+        }
+    }
+
+    private func calculate() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let bytes = CacheCleaner.calculateCacheSize()
+            DispatchQueue.main.async {
+                cacheBytes = bytes
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    phase = .ready
+                }
+            }
+        }
+    }
+
+    private func clean() {
+        withAnimation(.easeInOut(duration: 0.2)) { phase = .cleaning }
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.3) {
+            CacheCleaner.clearCache()
+            DispatchQueue.main.async {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                    phase = .done
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: onClose)
+            }
+        }
+    }
+}
+
 // MARK: - 存储管理（空间概览 + 占用明细 + 清理临时缓存）
 
 struct StorageManageView: View {
@@ -957,19 +1077,10 @@ struct StorageManageView: View {
             .listStyle(.insetGrouped)
 
             if showCleanConfirm {
-                GlassAlertOverlay(
-                    iconName: "trash.circle.fill",
-                    iconColor: .red,
-                    title: "清理临时缓存？",
-                    message: "将释放 \(CacheCleaner.sizeText(cacheSize)) 的空间，不影响心率记录",
-                    confirmTitle: "清理",
-                    confirmDestructive: true,
-                    onConfirm: {
-                        showCleanConfirm = false
-                        cleanCache()
-                    },
-                    onCancel: { showCleanConfirm = false }
-                )
+                CacheCleanupOverlayView(onClose: {
+                    showCleanConfirm = false
+                    refresh()
+                })
                 .transition(.opacity)
                 .zIndex(10)
             }
