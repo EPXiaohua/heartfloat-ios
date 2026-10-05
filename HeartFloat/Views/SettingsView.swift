@@ -462,6 +462,8 @@ struct RecordingDetailView: View {
 
     @State private var shareItem: ShareItem?
     @State private var showExportMenu = false
+    /// 图表点击查询的采样点下标（点击绘图区外或统计卡时清除）
+    @State private var queryIndex: Int?
 
     struct ShareItem: Identifiable {
         let id = UUID()
@@ -473,8 +475,10 @@ struct RecordingDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     statsSection
+                        .contentShape(Rectangle())
+                        .onTapGesture { queryIndex = nil }
 
-                    RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor)
+                    RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor, queryIndex: $queryIndex)
                         .frame(height: 300)
                         .background(Color(.systemGray6))
                         .cornerRadius(14)
@@ -600,8 +604,7 @@ struct RecordingDetailView: View {
 struct RecordingChartView: View {
     let samples: [HeartRateRecording.Sample]
     let themeColor: Color
-
-    @State private var queryIndex: Int?
+    @Binding var queryIndex: Int?
 
     var body: some View {
         GeometryReader { geo in
@@ -622,10 +625,19 @@ struct RecordingChartView: View {
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { queryIndex = layout.nearestIndex(in: samples, at: $0.location) }
-                    .onEnded { queryIndex = layout.nearestIndex(in: samples, at: $0.location) }
+                    .onChanged { handleTouch(at: $0.location, layout: layout) }
+                    .onEnded { handleTouch(at: $0.location, layout: layout) }
             )
         }
+    }
+
+    /// 点击绘图区内查询最近采样点；点击绘图区外的留白区域则清除查询
+    private func handleTouch(at point: CGPoint, layout: RecordingChartLayout) {
+        guard layout.plot.insetBy(dx: -10, dy: -10).contains(point) else {
+            queryIndex = nil
+            return
+        }
+        queryIndex = layout.nearestIndex(in: samples, at: point)
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, layout: RecordingChartLayout) {
