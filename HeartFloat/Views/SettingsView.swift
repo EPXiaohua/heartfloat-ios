@@ -402,6 +402,245 @@ struct HttpPushSettingsView: View {
     }
 }
 
+// MARK: - 全屏横屏图表（单指拖动平移 + 双指捏合缩放 + 单击查询 + 滑块辅助）
+
+struct LandscapeChartView: View {
+    let recording: HeartRateRecording
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var viewStartDate: Date?
+    @State private var viewSpanSeconds: TimeInterval?
+    @State private var queryIndex: Int?
+
+    // 手势状态
+    @State private var dragActive = false
+    @State private var dragStartViewStart: Date?
+    @State private var magnifying = false
+    @State private var magnifyStartSpan: TimeInterval?
+    @State private var magnifyCenter: Date?
+
+    /// 横向缩放时可见的最小时间窗口
+    private let minSpan: TimeInterval = 30
+
+    private var firstDate: Date {
+        recording.samples.first?.t ?? Date()
+    }
+    private var totalSpan: TimeInterval {
+        guard let last = recording.samples.last?.t else { return minSpan }
+        return max(last.timeIntervalSince(firstDate), minSpan)
+    }
+    private var maxZoom: Double {
+        max(1, totalSpan / minSpan)
+    }
+    /// 当前视口宽度（秒）
+    private var currentSpan: TimeInterval {
+        min(viewSpanSeconds ?? totalSpan, totalSpan)
+    }
+    /// 当前视口起点（钳制在数据范围内）
+    private var currentStart: Date {
+        clampStart(viewStartDate ?? firstDate, span: currentSpan)
+    }
+    /// 当前缩放倍率（滑块显示用）
+    private var zoomValue: Double {
+        currentSpan > 0 ? totalSpan / currentSpan : 1
+    }
+    /// 当前视口偏移比例（滑块显示用）
+    private var offsetValue: Double {
+        let draggable = max(0, totalSpan - currentSpan)
+        guard draggable > 0 else { return 0 }
+        return currentStart.timeIntervalSince(firstDate) / draggable
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    if let index = queryIndex, recording.samples.indices.contains(index) {
+                        let sample = recording.samples[index]
+                        Text("\(Self.timeText(sample.t)) · \(sample.bpm) BPM")
+                            .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
+                    } else {
+                        Text("单击图表查看对应时间的心率")
+                            .foregroundColor(.white.opacity(0.55))
+                    }
+                    Spacer()
+                    Text("共 \(recording.samples.count) 点")
+                        .foregroundColor(.white.opacity(0.55))
+                }
+                .font(.system(size: 12, design: .monospaced))
+
+                chartArea
+
+                // 底部：视口位置滑块（拖动图表同样可以平移）
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.left.and.right")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.7))
+                    Slider(
+                        value: Binding(get: { offsetValue }, set: { setOffset($0) }),
+                        in: 0...1
+                    )
+                    .disabled(totalSpan - currentSpan < 1)
+                    Text("\(Int(offsetValue * 100))%")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(width: 34)
+                }
+            }
+            .padding()
+
+            // 右上角：横向缩放滑块
+            VStack {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.7))
+                        Slider(
+                            value: Binding(get: { zoomValue }, set: { setZoom($0) }),
+                            in: 1...maxZoom
+                        )
+                        .frame(width: 180)
+                        Text(String(format: "%.1fx", zoomValue))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.7))
+                            .frame(width: 40)
+                    }
+                    .padding(10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+                Spacer()
+            }
+            .padding()
+
+            // 左上角：关闭
+            VStack {
+                HStack {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(.white.opacity(0.85))
+                    }
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding()
+        }
+        .onAppear { OrientationManager.shared.enterLandscape() }
+        .onDisappear { OrientationManager.shared.exitLandscape() }
+    }
+
+    /// 图表区：单击查询、单指拖动平移、双指捏合缩放
+    private var chartArea: some View {
+        GeometryReader { geo in
+            RecordingChartView(
+                samples: recording.samples,
+                themeColor: recordingThemeColor,
+                queryIndex: $queryIndex,
+                viewStart: currentStart,
+                viewSpanSeconds: currentSpan,
+                queryEnabled: false
+            )
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { handleDragChanged($0, size: geo.size) }
+                    .onEnded { handleDragEnded($0, size: geo.size) }
+            )
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { handleMagnify($0) }
+                    .onEnded { _ in
+                        magnifying = false
+                        magnifyStartSpan = nil
+                    }
+            )
+        }
+    }
+
+    /// 单指拖动：位移超过阈值进入平移模式，否则视为单击
+    private func handleDragChanged(_ value: DragGesture.Value, size: CGSize) {
+        guard !magnifying else { return }
+        if !dragActive {
+            if abs(value.translation.width) > 10 || abs(value.translation.height) > 10 {
+                dragActive = true
+                dragStartViewStart = currentStart
+            } else {
+                return
+            }
+        }
+        let plotWidth = max(size.width - 52, 10)
+        let shift = -value.translation.width / plotWidth * currentSpan
+        viewStartDate = clampStart(dragStartViewStart!.addingTimeInterval(shift), span: currentSpan)
+    }
+
+    private func handleDragEnded(_ value: DragGesture.Value, size: CGSize) {
+        defer {
+            dragActive = false
+            dragStartViewStart = nil
+        }
+        guard !magnifying, !dragActive else { return }
+        // 未进入平移模式 → 单击查询；点击绘图区外清除
+        let plot = CGRect(x: 40, y: 8, width: max(size.width - 52, 10), height: max(size.height - 30, 10))
+        guard plot.insetBy(dx: -10, dy: -10).contains(value.location) else {
+            queryIndex = nil
+            return
+        }
+        let layout = RecordingChartLayout(
+            samples: recording.samples,
+            size: size,
+            viewStart: currentStart,
+            viewSpanSeconds: currentSpan
+        )
+        queryIndex = layout.nearestIndex(in: recording.samples, at: value.location)
+    }
+
+    /// 双指捏合：张开放大（时间窗口变窄），保持视口中心稳定
+    private func handleMagnify(_ value: MagnificationGesture.Value) {
+        magnifying = true
+        if magnifyStartSpan == nil {
+            magnifyStartSpan = currentSpan
+            magnifyCenter = currentStart.addingTimeInterval(currentSpan / 2)
+        }
+        let newSpan = clampSpan(magnifyStartSpan! / value)
+        viewSpanSeconds = newSpan
+        viewStartDate = clampStart(magnifyCenter!.addingTimeInterval(-newSpan / 2), span: newSpan)
+    }
+
+    /// 右上角滑块设定缩放倍率（保持视口中心稳定）
+    private func setZoom(_ newZoom: Double) {
+        let newSpan = clampSpan(totalSpan / max(newZoom, 0.0001))
+        let center = currentStart.addingTimeInterval(currentSpan / 2)
+        viewSpanSeconds = newSpan
+        viewStartDate = clampStart(center.addingTimeInterval(-newSpan / 2), span: newSpan)
+    }
+
+    /// 底部滑块设定视口位置
+    private func setOffset(_ fraction: Double) {
+        let draggable = max(0, totalSpan - currentSpan)
+        viewStartDate = clampStart(firstDate.addingTimeInterval(fraction * draggable), span: currentSpan)
+    }
+
+    private func clampSpan(_ span: TimeInterval) -> TimeInterval {
+        min(max(span, minSpan), totalSpan)
+    }
+
+    private func clampStart(_ start: Date, span: TimeInterval) -> Date {
+        let maxStart = firstDate.addingTimeInterval(max(0, totalSpan - span))
+        return min(max(start, firstDate), maxStart)
+    }
+
+    private static func timeText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
 // MARK: - 心率记录列表
 
 struct RecordingsListView: View {
@@ -462,6 +701,7 @@ struct RecordingDetailView: View {
 
     @State private var shareItem: ShareItem?
     @State private var showExportMenu = false
+    @State private var showLandscape = false
     /// 图表点击查询的采样点下标（点击绘图区外或统计卡时清除）
     @State private var queryIndex: Int?
 
@@ -482,6 +722,22 @@ struct RecordingDetailView: View {
                         .frame(height: 300)
                         .background(Color(.systemGray6))
                         .cornerRadius(14)
+                        .overlay(alignment: .topTrailing) {
+                            Button(action: {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                showLandscape = true
+                            }) {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.primary.opacity(0.55))
+                                    .frame(width: 28, height: 28)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                            }
+                            .padding(8)
+                        }
+                        .fullScreenCover(isPresented: $showLandscape) {
+                            LandscapeChartView(recording: recording)
+                        }
 
                     exportMenu
                 }
@@ -605,11 +861,25 @@ struct RecordingChartView: View {
     let samples: [HeartRateRecording.Sample]
     let themeColor: Color
     @Binding var queryIndex: Int?
+    /// 视口起点与宽度（秒）；nil 时覆盖全部数据
+    var viewStart: Date? = nil
+    var viewSpanSeconds: TimeInterval? = nil
+    /// 内置点击查询手势开关（全屏模式下由外部手势接管）
+    var queryEnabled: Bool = true
+
+    /// 点击绘图区内查询最近采样点；点击绘图区外的留白区域则清除查询
+    private func handleTouch(at point: CGPoint, layout: RecordingChartLayout) {
+        guard layout.plot.insetBy(dx: -10, dy: -10).contains(point) else {
+            queryIndex = nil
+            return
+        }
+        queryIndex = layout.nearestIndex(in: samples, at: point)
+    }
 
     var body: some View {
         GeometryReader { geo in
-            let layout = RecordingChartLayout(samples: samples, size: geo.size)
-            Canvas { context, size in
+            let layout = RecordingChartLayout(samples: samples, size: geo.size, viewStart: viewStart, viewSpanSeconds: viewSpanSeconds)
+            let chart = Canvas { context, size in
                 draw(in: &context, size: size, layout: layout)
             }
             .overlay(alignment: .top) {
@@ -623,21 +893,17 @@ struct RecordingChartView: View {
                 }
             }
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { handleTouch(at: $0.location, layout: layout) }
-                    .onEnded { handleTouch(at: $0.location, layout: layout) }
-            )
-        }
-    }
 
-    /// 点击绘图区内查询最近采样点；点击绘图区外的留白区域则清除查询
-    private func handleTouch(at point: CGPoint, layout: RecordingChartLayout) {
-        guard layout.plot.insetBy(dx: -10, dy: -10).contains(point) else {
-            queryIndex = nil
-            return
+            if queryEnabled {
+                chart.gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { handleTouch(at: $0.location, layout: layout) }
+                        .onEnded { handleTouch(at: $0.location, layout: layout) }
+                )
+            } else {
+                chart
+            }
         }
-        queryIndex = layout.nearestIndex(in: samples, at: point)
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, layout: RecordingChartLayout) {
@@ -753,19 +1019,23 @@ private struct RecordingChartLayout {
     let ymin: Double
     let ymax: Double
 
-    init(samples: [HeartRateRecording.Sample], size: CGSize) {
+    init(samples: [HeartRateRecording.Sample], size: CGSize, viewStart: Date? = nil, viewSpanSeconds: TimeInterval? = nil) {
         plot = CGRect(x: 40, y: 8, width: max(size.width - 52, 10), height: max(size.height - 30, 10))
         let first = samples.first?.t ?? Date()
         let last = samples.last?.t ?? first
-        xmin = first
-        xmax = max(last, first.addingTimeInterval(10))
-        let values = samples.map { Double($0.bpm) }
+        // 视口：未指定时覆盖全部数据；指定时显示 [start, start+span] 区间
+        let start = viewStart ?? first
+        let span = viewSpanSeconds ?? max(last.timeIntervalSince(first), 10)
+        xmin = start
+        xmax = start.addingTimeInterval(span)
+        let inView = samples.filter { $0.t >= xmin && $0.t <= xmax }
+        let values = (inView.isEmpty ? samples : inView).map { Double($0.bpm) }
         let vmin = values.min() ?? 60
         let vmax = values.max() ?? 100
-        let span = max(vmax - vmin, 8) * 1.15
+        let spanY = max(vmax - vmin, 8) * 1.15
         let mid = (vmin + vmax) / 2
-        ymin = mid - span / 2
-        ymax = mid + span / 2
+        ymin = mid - spanY / 2
+        ymax = mid + spanY / 2
     }
 
     func x(_ t: Date) -> CGFloat {
