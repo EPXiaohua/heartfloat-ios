@@ -22,6 +22,8 @@ class BleService: NSObject, ObservableObject {
     private var heartRateCharacteristic: CBCharacteristic?
     private var scanTimeoutWork: DispatchWorkItem?
     private var directConnectTimeout: DispatchWorkItem?
+    private var watchdogWork: DispatchWorkItem?
+    private var lastNotificationAt: Date = .distantPast
     private var isManualStop = false
     /// 上次成功连接的设备（直连不依赖广播，避免断开后设备恢复广播慢导致扫不到）
     private var lastConnectedIdentifier: UUID?
@@ -107,6 +109,23 @@ class BleService: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: work)
     }
 
+    /// 数据看门狗：心率通知是 1Hz，连接状态下长时间收不到任何通知，
+    /// 说明设备已失效（关机/超出范围/设备端停止推送），主动断开并置为未连接
+    private func startWatchdog() {
+        watchdogWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.connectionState == .connected else { return }
+            if Date().timeIntervalSince(self.lastNotificationAt) > 15 {
+                self.addLog("超过 15 秒未收到设备数据，已自动断开")
+                self.disconnect()
+                return
+            }
+            self.startWatchdog()
+        }
+        watchdogWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+    }
+
     /// 取消连接流程（扫描中或连接中），不产生自动重连
     func cancelScan() {
         scanTimeoutWork?.cancel()
@@ -132,6 +151,7 @@ class BleService: NSObject, ObservableObject {
     func disconnect() {
         isManualStop = true
         scanTimeoutWork?.cancel()
+        watchdogWork?.cancel()
         if let peripheral = connectedPeripheral {
             peripheral.delegate = nil
             centralManager?.cancelPeripheralConnection(peripheral)
@@ -248,12 +268,16 @@ extension BleService: CBCentralManagerDelegate {
         // 记住设备，下次连接直接直连（持久化，重启后依然有效）
         lastConnectedIdentifier = peripheral.identifier
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "lastConnectedBLEPeripheral")
+        // 启动数据看门狗：设备只停数据不断链路时（如设备端关闭广播）系统不会报断连
+        lastNotificationAt = Date()
+        startWatchdog()
         peripheral.discoverServices([heartRateServiceUUID])
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         addLog("GATT连接断开")
         connectionState = .disconnected
+        watchdogWork?.cancel()
         connectedPeripheral = nil
         heartRateCharacteristic = nil
 
@@ -320,6 +344,9 @@ extension BleService: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        // 收到任何通知都刷新数据存活时间（看门狗依据）
+        lastNotificationAt = Date()
+
         if let error = error {
             addLog("读取特征值失败: \(error.localizedDescription)")
             return
