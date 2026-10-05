@@ -262,6 +262,12 @@ struct MainView: View {
                         .font(.system(size: 12))
                     Text("记录")
                         .font(.system(size: 12, weight: .medium))
+                    if viewModel.autoRecording {
+                        Text("A")
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 13, height: 13)
+                            .background(themeColor.opacity(0.15), in: Circle())
+                    }
                 }
                 .foregroundColor(themeColor)
                 .padding(.horizontal, 9)
@@ -279,11 +285,24 @@ struct MainView: View {
             }
         }
         .contextMenu {
-            Button(action: { viewModel.autoRecording = false }) {
-                Label("手动模式", systemImage: viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
+            Section {
+                Button(action: { viewModel.autoRecording = false }) {
+                    Label("手动模式", systemImage: !viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
+                }
+                Button(action: { viewModel.autoRecording = true }) {
+                    Label("Auto 模式", systemImage: viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
+                }
             }
-            Button(action: { viewModel.autoRecording = true }) {
-                Label("Auto 模式", systemImage: viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
+            // 禁用项渲染为灰色不可点，用作两种模式的用途说明
+            Section {
+                Button(action: {}) {
+                    Label("手动模式：手动开始，停止时确认后保存", systemImage: "hand.tap")
+                }
+                .disabled(true)
+                Button(action: {}) {
+                    Label("Auto 模式：连接成功自动记录，断开时自动保存", systemImage: "bolt.fill")
+                }
+                .disabled(true)
             }
         }
     }
