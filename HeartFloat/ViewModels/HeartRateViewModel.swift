@@ -21,6 +21,10 @@ class HeartRateViewModel: NSObject, ObservableObject {
         didSet {
             guard oldValue != autoRecording else { return }
             UserDefaults.standard.set(autoRecording, forKey: "recordingAutoMode")
+            // 已连接状态下切到 Auto：立即开始记录，否则点断开时不会走记录保护
+            if autoRecording, connectionState == .connected, !isRecording {
+                startRecording()
+            }
         }
     }
     /// 上次异常退出遗留的未保存记录（启动时检测，弹窗询问保存或丢弃）

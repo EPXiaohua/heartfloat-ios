@@ -8,7 +8,6 @@ struct MainView: View {
     @State private var blink = false
     @State private var showStopConfirm = false
     @State private var showDisconnectConfirm = false
-    @State private var showModePicker = false
 
     private let themeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
 
@@ -77,13 +76,6 @@ struct MainView: View {
                 .zIndex(11)
             }
 
-            // 长按记录按钮：选择手动 / Auto 模式
-            if showModePicker {
-                ModeSelectOverlay(viewModel: viewModel) { showModePicker = false }
-                    .transition(.opacity)
-                    .zIndex(12)
-            }
-
             // 上次异常退出遗留的未保存记录（最高优先级，必须二选一）
             if let pending = viewModel.pendingUnsavedRecording {
                 let duration = pending.samples.last?.t.timeIntervalSince(pending.startedAt) ?? 0
@@ -102,6 +94,9 @@ struct MainView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.showConnectionOverlay)
+        .animation(.easeInOut(duration: 0.2), value: showStopConfirm)
+        .animation(.easeInOut(duration: 0.2), value: showDisconnectConfirm)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.pendingUnsavedRecording != nil)
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
@@ -275,14 +270,20 @@ struct MainView: View {
             }
         }
         .opacity(viewModel.connectionState == .connected || viewModel.isRecording ? 1 : 0.45)
-        .onLongPressGesture(minimumDuration: 0.5) {
-            showModePicker = true
-        }
         .onTapGesture {
             if viewModel.isRecording {
                 showStopConfirm = true
             } else if viewModel.connectionState == .connected {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 viewModel.startRecording()
+            }
+        }
+        .contextMenu {
+            Button(action: { viewModel.autoRecording = false }) {
+                Label("手动模式", systemImage: viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
+            }
+            Button(action: { viewModel.autoRecording = true }) {
+                Label("Auto 模式", systemImage: viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
             }
         }
     }
@@ -701,7 +702,10 @@ struct GlassAlertOverlay: View {
                     .multilineTextAlignment(.center)
 
                 VStack(spacing: 10) {
-                    Button(action: onConfirm) {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        onConfirm()
+                    }) {
                         Text(confirmTitle)
                             .font(.system(size: 15, weight: .medium))
                             .frame(maxWidth: .infinity)
@@ -710,7 +714,10 @@ struct GlassAlertOverlay: View {
                             .foregroundColor(.white)
                             .cornerRadius(12)
                     }
-                    Button(action: onCancel) {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        onCancel()
+                    }) {
                         Text(cancelTitle)
                             .font(.system(size: 15, weight: .medium))
                             .frame(maxWidth: .infinity)
@@ -726,73 +733,6 @@ struct GlassAlertOverlay: View {
             .frame(width: 310)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
             .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
-        }
-    }
-}
-
-// MARK: - 记录模式选择弹窗（长按记录按钮打开）
-
-struct ModeSelectOverlay: View {
-    @ObservedObject var viewModel: HeartRateViewModel
-    var onClose: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.35)
-                .ignoresSafeArea()
-                .onTapGesture { onClose() }
-
-            VStack(spacing: 10) {
-                Text("记录模式")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.primary)
-                    .padding(.bottom, 2)
-
-                modeRow(
-                    title: "手动模式",
-                    subtitle: "手动开始，停止时确认后保存",
-                    isSelected: !viewModel.autoRecording
-                ) {
-                    viewModel.autoRecording = false
-                    onClose()
-                }
-
-                modeRow(
-                    title: "Auto 模式",
-                    subtitle: "连接成功自动记录，断开时自动保存",
-                    isSelected: viewModel.autoRecording
-                ) {
-                    viewModel.autoRecording = true
-                    onClose()
-                }
-            }
-            .padding(22)
-            .frame(width: 310)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
-        }
-    }
-
-    private func modeRow(title: String, subtitle: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.primary)
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20))
-                    .foregroundColor(isSelected ? Color(red: 1.0, green: 0.42, blue: 0.42) : Color(.systemGray3))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(isSelected ? Color(red: 1.0, green: 0.42, blue: 0.42).opacity(0.10) : Color(.systemGray6).opacity(0.7))
-            .cornerRadius(12)
         }
     }
 }
