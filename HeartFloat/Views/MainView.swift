@@ -589,6 +589,7 @@ struct HeartRateChartView: View {
 struct ConnectionOverlayView: View {
     @ObservedObject var viewModel: HeartRateViewModel
     @State private var resultIconShown = false
+    @State private var appeared = false
 
     private var isFailed: Bool { viewModel.connectionState == .failed }
     private var isConnected: Bool { viewModel.connectionState == .connected }
@@ -614,6 +615,14 @@ struct ConnectionOverlayView: View {
             .frame(width: 310)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
             .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+            // 开场：淡入 + spring 展开（与其他弹窗一致）
+            .scaleEffect(appeared ? 1 : 0.85)
+            .opacity(appeared ? 1 : 0)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+                appeared = true
+            }
         }
         .onChange(of: viewModel.connectionState) { state in
             if state == .connected || state == .failed {
@@ -714,6 +723,8 @@ struct GlassAlertOverlay: View {
     var onConfirm: () -> Void
     var onCancel: (() -> Void)? = nil
 
+    @State private var appeared = false
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.35)
@@ -768,6 +779,14 @@ struct GlassAlertOverlay: View {
             .frame(width: 310)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
             .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+            // 开场：淡入 + spring 展开（与清理缓存弹窗一致）
+            .scaleEffect(appeared ? 1 : 0.85)
+            .opacity(appeared ? 1 : 0)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+                appeared = true
+            }
         }
     }
 }
@@ -794,6 +813,10 @@ struct AnchoredMenuItem: Identifiable {
 struct AnchoredMenuCard: View {
     let items: [AnchoredMenuItem]
     var onClose: () -> Void
+    /// 展开动画的锚点（向上弹出的菜单从底部展开）
+    var popAnchor: UnitPoint = .bottom
+
+    @State private var appeared = false
 
     var body: some View {
         VStack(spacing: 2) {
@@ -809,6 +832,14 @@ struct AnchoredMenuCard: View {
         .frame(width: 250)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.16), radius: 20, y: 6)
+        // 开场：淡入 + spring 展开
+        .scaleEffect(appeared ? 1 : 0.8, anchor: popAnchor)
+        .opacity(appeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) {
+                appeared = true
+            }
+        }
     }
 
     private func row(_ item: AnchoredMenuItem) -> some View {
