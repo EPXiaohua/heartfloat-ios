@@ -6,7 +6,7 @@ struct MainView: View {
 
     @State private var showSettings = false
 
-    private let themeColor = Color(hex: "EC746F")
+    private let themeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
 
     var body: some View {
         ZStack {
