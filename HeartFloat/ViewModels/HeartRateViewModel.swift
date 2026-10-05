@@ -53,13 +53,16 @@ class HeartRateViewModel: NSObject, ObservableObject {
                 guard let self = self else { return }
                 self.httpServer.updateHeartRate(rate, contact: self.isContact)
 
-                // 每次采样无条件记录（含相同值），并裁掉窗口外的旧点
-                let now = Date()
-                self.heartRateSamples.append((now, Double(rate)))
-                while let first = self.heartRateSamples.first, now.timeIntervalSince(first.0) > 65 {
-                    self.heartRateSamples.removeFirst()
+                // 无读数（断连归零）不记录采样点
+                if rate > 0 {
+                    // 每次采样无条件记录（含相同值），并裁掉窗口外的旧点
+                    let now = Date()
+                    self.heartRateSamples.append((now, Double(rate)))
+                    while let first = self.heartRateSamples.first, now.timeIntervalSince(first.0) > 65 {
+                        self.heartRateSamples.removeFirst()
+                    }
+                    self.lastSampleAt = now
                 }
-                self.lastSampleAt = now
 
                 // 数字大字 / 画中画仅在值变化时刷新
                 guard rate != self.heartRate else { return }
@@ -71,7 +74,22 @@ class HeartRateViewModel: NSObject, ObservableObject {
         bleService.$connectionState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                self?.connectionState = state
+                guard let self = self else { return }
+                self.connectionState = state
+
+                // 断开后读数归零、曲线清空，重新连接后从头统计
+                if state == .disconnected || state == .failed {
+                    self.heartRate = 0
+                    self.pipOverlay?.update(heartRate: 0)
+                    self.isContact = false
+                    self.httpServer.updateHeartRate(0, contact: false)
+                    self.heartRateSamples.removeAll()
+                    self.lastSampleAt = .distantPast
+                    self.displayLo = nil
+                    self.displayHi = nil
+                    self.lastFrameAt = .distantPast
+                }
+
                 // 连接成功后展示勾动画片刻再自动关闭弹窗
                 if state == .connected {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
