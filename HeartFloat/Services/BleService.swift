@@ -25,8 +25,10 @@ class BleService: NSObject, ObservableObject {
     private var scanTimeoutWork: DispatchWorkItem?
     private var directConnectTimeout: DispatchWorkItem?
     private var watchdogWork: DispatchWorkItem?
+    private var gattTimeoutWork: DispatchWorkItem?
     private var lastNotificationAt: Date = .distantPast
     private var isManualStop = false
+    private var isSkippingDevice = false
     /// 上次成功连接的设备（直连不依赖广播，避免断开后设备恢复广播慢导致扫不到）
     private var lastConnectedIdentifier: UUID?
 
@@ -103,6 +105,8 @@ class BleService: NSObject, ObservableObject {
         scanTimeoutWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self, self.connectionState == .connecting else { return }
+            // 已进入设备识别阶段（GATT 已连上），由识别超时接管
+            if self.connectedPeripheral != nil { return }
             self.centralManager?.stopScan()
             self.connectionState = .failed
             self.addLog("扫描超时，未找到手环")
@@ -132,6 +136,7 @@ class BleService: NSObject, ObservableObject {
     func cancelScan() {
         scanTimeoutWork?.cancel()
         directConnectTimeout?.cancel()
+        gattTimeoutWork?.cancel()
         centralManager?.stopScan()
         if connectionState != .connected {
             if let peripheral = connectedPeripheral {
@@ -155,6 +160,7 @@ class BleService: NSObject, ObservableObject {
         isManualStop = true
         scanTimeoutWork?.cancel()
         watchdogWork?.cancel()
+        gattTimeoutWork?.cancel()
         if let peripheral = connectedPeripheral {
             peripheral.delegate = nil
             centralManager?.cancelPeripheralConnection(peripheral)
@@ -185,9 +191,6 @@ class BleService: NSObject, ObservableObject {
         }
     }
 
-    private var lastLoggedHeartRate: Int = -1
-    private var lastLogTime: Date = .distantPast
-
     private func parseHeartRateData(_ data: Data) {
         guard data.count >= 2 else { return }
 
@@ -208,17 +211,6 @@ class BleService: NSObject, ObservableObject {
         if heartRate >= 30 && heartRate <= 220 {
             currentHeartRate = heartRate
             isContact = hasSensorContact
-
-            let now = Date()
-            let timeSinceLastLog = now.timeIntervalSince(lastLogTime)
-            let rateChanged = heartRate != lastLoggedHeartRate
-
-            if rateChanged || timeSinceLastLog > 10 {
-                let contactStatus = hasSensorContact ? "(已接触)" : "(未接触)"
-                addLog("心率: \(heartRate) BPM \(contactStatus)")
-                lastLoggedHeartRate = heartRate
-                lastLogTime = now
-            }
         }
     }
 }
@@ -265,24 +257,56 @@ extension BleService: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        addLog("GATT连接成功")
-        connectionState = .connected
-        connectedDeviceName = peripheral.name ?? "未知设备"
+        addLog("GATT链路已建立，识别心率服务中...")
+        // 保持 connecting：发现心率服务/特征并成功开启通知后，才算真正连接成功
+        isSkippingDevice = false
         directConnectTimeout?.cancel()
         directConnectTimeout = nil
         // 记住设备，下次连接直接直连（持久化，重启后依然有效）
         lastConnectedIdentifier = peripheral.identifier
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "lastConnectedBLEPeripheral")
-        // 启动数据看门狗：设备只停数据不断链路时（如设备端关闭广播）系统不会报断连
-        lastNotificationAt = Date()
-        startWatchdog()
+
+        // 识别超时保护：服务/特征发现迟迟不完成则放弃该设备
+        gattTimeoutWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.connectionState == .connecting else { return }
+            self.addLog("心率服务识别超时，断开该设备")
+            self.abandonCurrentPeripheral()
+        }
+        gattTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
+
         peripheral.discoverServices([heartRateServiceUUID])
     }
 
+    /// 放弃当前设备（没有心率服务/特征、识别超时等）：断开并继续扫描找其他设备
+    private func abandonCurrentPeripheral() {
+        gattTimeoutWork?.cancel()
+        guard let peripheral = connectedPeripheral else { return }
+        isSkippingDevice = true
+        peripheral.delegate = nil
+        connectedPeripheral = nil
+        heartRateCharacteristic = nil
+        centralManager?.cancelPeripheralConnection(peripheral)
+        // connect 前扫描已停止，这里恢复扫描继续找
+        if connectionState == .connecting, let central = centralManager, central.state == .poweredOn {
+            addLog("继续扫描其他设备...")
+            central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        }
+    }
+
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        watchdogWork?.cancel()
+        gattTimeoutWork?.cancel()
+
+        // 跳过无效设备（无心率服务/特征）时的主动断开：扫描已在 abandon 里恢复
+        if isSkippingDevice {
+            isSkippingDevice = false
+            return
+        }
+
         addLog("GATT连接断开")
         connectionState = .disconnected
-        watchdogWork?.cancel()
         connectedPeripheral = nil
         connectedDeviceName = ""
         heartRateCharacteristic = nil
@@ -313,39 +337,34 @@ extension BleService: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error {
             addLog("服务发现失败: \(error.localizedDescription)")
+            abandonCurrentPeripheral()
             return
         }
 
-        guard let services = peripheral.services else { return }
-        addLog("服务发现成功，共\(services.count)个服务")
-
-        for service in services {
-            addLog("服务: \(service.uuid.uuidString)")
-
-            if service.uuid == heartRateServiceUUID {
-                addLog("找到标准心率服务 (180d)")
-                peripheral.discoverCharacteristics([heartRateMeasurementUUID], for: service)
-            }
+        if let hrService = peripheral.services?.first(where: { $0.uuid == heartRateServiceUUID }) {
+            addLog("已找到心率服务 (180D)")
+            peripheral.discoverCharacteristics([heartRateMeasurementUUID], for: hrService)
+        } else {
+            addLog("未发现心率服务，不是心率设备")
+            abandonCurrentPeripheral()
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         if let error = error {
             addLog("特征发现失败: \(error.localizedDescription)")
+            abandonCurrentPeripheral()
             return
         }
 
-        guard let characteristics = service.characteristics else { return }
-
-        for characteristic in characteristics {
-            addLog("特征: \(characteristic.uuid.uuidString)")
-
-            if characteristic.uuid == heartRateMeasurementUUID {
-                addLog("找到心率测量特征 (2a37)")
-                heartRateCharacteristic = characteristic
-                peripheral.setNotifyValue(true, for: characteristic)
-                peripheral.readValue(for: characteristic)
-            }
+        if let characteristic = service.characteristics?.first(where: { $0.uuid == heartRateMeasurementUUID }) {
+            addLog("已找到心率特征 (2A37)，开启通知...")
+            heartRateCharacteristic = characteristic
+            peripheral.setNotifyValue(true, for: characteristic)
+            peripheral.readValue(for: characteristic)
+        } else {
+            addLog("未发现心率特征，不是心率设备")
+            abandonCurrentPeripheral()
         }
     }
 
@@ -367,14 +386,19 @@ extension BleService: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         if let error = error {
-            addLog("通知状态更新失败: \(error.localizedDescription)")
+            addLog("开启心率通知失败: \(error.localizedDescription)")
+            abandonCurrentPeripheral()
             return
         }
 
-        if characteristic.isNotifying {
-            addLog("通知已启用")
-        } else {
-            addLog("通知已关闭")
-        }
+        guard characteristic.uuid == heartRateMeasurementUUID, characteristic.isNotifying else { return }
+        // 心率通知就绪才算真正连接成功
+        addLog("心率通知已就绪，连接成功 ✅")
+        gattTimeoutWork?.cancel()
+        connectionState = .connected
+        connectedDeviceName = connectedPeripheral?.name ?? "未知设备"
+        // 启动数据看门狗：设备只停数据不断链路时（如设备端关闭广播）系统不会报断连
+        lastNotificationAt = Date()
+        startWatchdog()
     }
 }
