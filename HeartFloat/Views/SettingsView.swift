@@ -458,6 +458,8 @@ struct RecordingDetailView: View {
     let recording: HeartRateRecording
 
     @State private var shareItem: ShareItem?
+    @State private var showExportMenu = false
+    @State private var exportButtonFrame: CGRect = .zero
 
     struct ShareItem: Identifiable {
         let id = UUID()
@@ -465,19 +467,46 @@ struct RecordingDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                statsSection
+        ZStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    statsSection
 
-                RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor)
-                    .frame(height: 300)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(14)
+                    RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor)
+                        .frame(height: 300)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(14)
 
-                exportMenu
+                    exportMenu
+                }
+                .padding()
             }
-            .padding()
+
+            // 导出格式选择（锚定在导出按钮旁弹出）
+            if showExportMenu {
+                AnchoredMenuOverlay(anchor: exportButtonFrame, items: [
+                    AnchoredMenuItem(
+                        title: "导出 CSV",
+                        subtitle: "表格软件可直接打开",
+                        icon: "tablecells"
+                    ) {
+                        exportFile(ext: "csv", text: csvText)
+                    },
+                    AnchoredMenuItem(
+                        title: "导出 JSON",
+                        subtitle: "完整原始数据，便于程序处理",
+                        icon: "curlybraces.square"
+                    ) {
+                        exportFile(ext: "json", text: jsonText)
+                    }
+                ]) {
+                    showExportMenu = false
+                }
+                .zIndex(10)
+            }
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: showExportMenu)
+        .onPreferenceChange(GlobalFrameKey.self) { exportButtonFrame = $0 }
         .navigationTitle("记录详情")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $shareItem) { item in
@@ -513,14 +542,10 @@ struct RecordingDetailView: View {
     }
 
     private var exportMenu: some View {
-        Menu {
-            Button(action: { exportFile(ext: "csv", text: csvText) }) {
-                Label("导出 CSV（表格）", systemImage: "tablecells")
-            }
-            Button(action: { exportFile(ext: "json", text: jsonText) }) {
-                Label("导出 JSON（原始数据）", systemImage: "curlybraces.square")
-            }
-        } label: {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            showExportMenu = true
+        }) {
             HStack {
                 Image(systemName: "square.and.arrow.up")
                 Text("导出记录")
@@ -532,6 +557,11 @@ struct RecordingDetailView: View {
             .foregroundColor(.white)
             .cornerRadius(14)
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: GlobalFrameKey.self, value: geo.frame(in: .global))
+            }
+        )
     }
 
     private var csvText: String {

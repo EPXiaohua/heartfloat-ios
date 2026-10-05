@@ -8,6 +8,8 @@ struct MainView: View {
     @State private var blink = false
     @State private var showStopConfirm = false
     @State private var showDisconnectConfirm = false
+    @State private var showModeMenu = false
+    @State private var chipFrame: CGRect = .zero
 
     private let themeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
 
@@ -92,11 +94,35 @@ struct MainView: View {
                 .transition(.opacity)
                 .zIndex(20)
             }
+            // 长按记录按钮：自定义锚定模式菜单（contextMenu 形态，支持副标题）
+            if showModeMenu {
+                AnchoredMenuOverlay(anchor: chipFrame, items: [
+                    AnchoredMenuItem(
+                        title: "手动模式",
+                        subtitle: "手动开始，停止时确认后保存",
+                        isSelected: !viewModel.autoRecording
+                    ) {
+                        viewModel.autoRecording = false
+                    },
+                    AnchoredMenuItem(
+                        title: "Auto 模式",
+                        subtitle: "连接自动记录，断开自动保存",
+                        isSelected: viewModel.autoRecording
+                    ) {
+                        viewModel.autoRecording = true
+                    }
+                ]) {
+                    showModeMenu = false
+                }
+                .zIndex(12)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.showConnectionOverlay)
         .animation(.easeInOut(duration: 0.2), value: showStopConfirm)
         .animation(.easeInOut(duration: 0.2), value: showDisconnectConfirm)
+        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: showModeMenu)
         .animation(.easeInOut(duration: 0.2), value: viewModel.pendingUnsavedRecording != nil)
+        .onPreferenceChange(GlobalFrameKey.self) { chipFrame = $0 }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
@@ -284,27 +310,15 @@ struct MainView: View {
                 viewModel.startRecording()
             }
         }
-        .contextMenu {
-            Section {
-                Button(action: { viewModel.autoRecording = false }) {
-                    Label("手动模式", systemImage: !viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
-                }
-                Button(action: { viewModel.autoRecording = true }) {
-                    Label("Auto 模式", systemImage: viewModel.autoRecording ? "checkmark.circle.fill" : "circle")
-                }
-            }
-            // 禁用项渲染为灰色不可点，用作两种模式的用途说明
-            Section {
-                Button(action: {}) {
-                    Label("手动模式：手动开始，停止时确认后保存", systemImage: "hand.tap")
-                }
-                .disabled(true)
-                Button(action: {}) {
-                    Label("Auto 模式：连接成功自动记录，断开时自动保存", systemImage: "bolt.fill")
-                }
-                .disabled(true)
-            }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            showModeMenu = true
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: GlobalFrameKey.self, value: geo.frame(in: .global))
+            }
+        )
     }
 
     private var statusText: String {
@@ -753,6 +767,109 @@ struct GlassAlertOverlay: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
             .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
         }
+    }
+}
+
+// MARK: - 锚定弹出菜单（contextMenu 形态的自定义实现，支持副标题说明）
+
+struct GlobalFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+struct AnchoredMenuItem: Identifiable {
+    let id = UUID()
+    var title: String
+    var subtitle: String? = nil
+    var icon: String? = nil
+    var isSelected = false
+    var action: () -> Void
+}
+
+struct AnchoredMenuOverlay: View {
+    let anchor: CGRect
+    let items: [AnchoredMenuItem]
+    var onClose: () -> Void
+
+    private let menuWidth: CGFloat = 250
+
+    var body: some View {
+        GeometryReader { geo in
+            let screen = geo.frame(in: .global)
+            let menuHeight = Self.estimatedHeight(for: items)
+            // 优先在锚点上方弹出，空间不足时移到下方；水平方向右对齐锚点并夹在屏幕内
+            let popsUp = anchor.minY - menuHeight - 12 > screen.minY + 50
+            let menuY = popsUp ? anchor.minY - menuHeight - 8 : anchor.maxY + 8
+            let menuX = min(max(anchor.maxX - menuWidth, screen.minX + 12), screen.maxX - menuWidth - 12)
+            let scaleAnchor: UnitPoint = popsUp ? .bottom : .top
+
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { onClose() }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 12).onEnded { _ in onClose() }
+                )
+                .overlay(
+                    VStack(spacing: 2) {
+                        ForEach(items) { item in
+                            row(item)
+                            if item.id != items.last?.id {
+                                Divider()
+                                    .padding(.horizontal, 14)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .frame(width: menuWidth)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .black.opacity(0.16), radius: 20, y: 6)
+                    .position(x: menuX + menuWidth / 2, y: menuY + menuHeight / 2)
+                    .transition(.scale(scale: 0.72, anchor: scaleAnchor).combined(with: .opacity))
+                )
+        }
+    }
+
+    private func row(_ item: AnchoredMenuItem) -> some View {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            item.action()
+            onClose()
+        }) {
+            HStack(spacing: 10) {
+                if let icon = item.icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 13))
+                        .foregroundColor(item.isDestructive ? .red : Color(red: 1.0, green: 0.42, blue: 0.42))
+                        .frame(width: 20)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(item.isDestructive ? .red : .primary)
+                    if let subtitle = item.subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                if item.isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 估算菜单高度用于锚定定位（卡片实际高度由内容自然撑开）
+    private static func estimatedHeight(for items: [AnchoredMenuItem]) -> CGFloat {
+        let rowHeight: CGFloat = items.contains { $0.subtitle != nil } ? 52 : 38
+        return CGFloat(items.count) * rowHeight + 12
     }
 }
 
