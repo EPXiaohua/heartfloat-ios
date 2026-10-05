@@ -1030,16 +1030,22 @@ struct CacheCleanupOverlayView: View {
 struct StorageManageView: View {
     @State private var recordingsSize: Int64 = 0
     @State private var cacheSize: Int64 = 0
+    @State private var appSize: Int64 = 0
     @State private var availableCapacity: Int64 = 0
     @State private var totalCapacity: Int64 = 0
     @State private var showCleanConfirm = false
     @State private var showNoCacheTip = false
     @State private var isCleaning = false
 
-    /// 应用占用（心率记录 + 临时缓存）占手机总容量的比例
-    private var usageRatio: Double {
-        guard totalCapacity > 0 else { return 0 }
-        return min(1, Double(recordingsSize + cacheSize) / Double(totalCapacity))
+    /// 三段比例：App 占用 / 其他已用 / 剩余可用（相对手机总容量）
+    private var appRatio: Double {
+        totalCapacity > 0 ? min(1, Double(appSize) / Double(totalCapacity)) : 0
+    }
+    private var freeRatio: Double {
+        totalCapacity > 0 ? min(1, Double(availableCapacity) / Double(totalCapacity)) : 0
+    }
+    private var otherRatio: Double {
+        max(0, 1 - appRatio - freeRatio)
     }
 
     var body: some View {
@@ -1047,19 +1053,28 @@ struct StorageManageView: View {
             List {
                 Section("手机空间") {
                     storageRow(icon: "iphone", label: "可用空间", value: CacheCleaner.sizeText(availableCapacity))
+                    storageRow(icon: "app", label: "应用占用", value: CacheCleaner.sizeText(appSize))
                     storageRow(icon: "internaldrive", label: "总容量", value: CacheCleaner.sizeText(totalCapacity))
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("应用占用对比")
-                                .font(.system(size: 14))
-                            Spacer()
-                            Text("\(CacheCleaner.sizeText(recordingsSize + cacheSize)) / \(CacheCleaner.sizeText(totalCapacity))")
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            legendDot(color: Color(red: 1.0, green: 0.42, blue: 0.42), text: "应用占用")
+                            legendDot(color: Color(.systemGray3), text: "其他已用")
+                            legendDot(color: Color(.systemGray5), text: "剩余可用")
                         }
-                        ProgressView(value: usageRatio)
-                            .progressViewStyle(.linear)
-                            .tint(Color(hex: "EC746F"))
+                        GeometryReader { geo in
+                            HStack(spacing: 2) {
+                                Capsule()
+                                    .fill(Color(red: 1.0, green: 0.42, blue: 0.42))
+                                    .frame(width: max(6, geo.size.width * appRatio))
+                                Capsule()
+                                    .fill(Color(.systemGray3))
+                                    .frame(width: max(6, geo.size.width * otherRatio))
+                                Capsule()
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: max(6, geo.size.width * freeRatio))
+                            }
+                        }
+                        .frame(height: 10)
                     }
                     .padding(.vertical, 4)
                 }
@@ -1068,9 +1083,9 @@ struct StorageManageView: View {
                     storageRow(icon: "waveform.path.ecg", label: "心率记录", value: CacheCleaner.sizeText(recordingsSize))
                     storageRow(icon: "doc.on.doc", label: "临时缓存", value: CacheCleaner.sizeText(cacheSize))
                 } header: {
-                    Text("应用占用")
+                    Text("数据占用")
                 } footer: {
-                    Text("临时缓存包含画中画载体视频、导出临时文件等可再生数据，清理后不影响心率记录。心率记录可在设置一级页面查看与管理。")
+                    Text("应用占用包含 App 本体与全部数据；其中临时缓存包含画中画载体视频、导出临时文件等可再生数据，清理后不影响心率记录。心率记录可在设置一级页面查看与管理。")
                 }
 
                 Section {
@@ -1132,6 +1147,17 @@ struct StorageManageView: View {
         .onAppear(perform: refresh)
     }
 
+    private func legendDot(color: Color, text: String) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(text)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+    }
+
     private func storageRow(icon: String, label: String, value: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
@@ -1151,6 +1177,7 @@ struct StorageManageView: View {
     private func refresh() {
         recordingsSize = CacheCleaner.directorySize(HeartRateRecordingStore.directory)
         cacheSize = CacheCleaner.directorySize(FileManager.default.temporaryDirectory)
+        appSize = CacheCleaner.appTotalSize()
         if let values = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey]
         ) {
@@ -1188,6 +1215,23 @@ private enum CacheCleaner {
 
     static func sizeText(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    /// 整个 App 的磁盘占用：App 本体（bundle）+ 沙盒数据（Documents/Library/tmp）
+    static func appTotalSize() -> Int64 {
+        var total: Int64 = 0
+        var directories: [URL] = []
+        if let bundle = Bundle.main.resourceURL {
+            directories.append(bundle)
+        }
+        let fm = FileManager.default
+        directories.append(fm.urls(for: .documentDirectory, in: .userDomainMask)[0])
+        directories.append(fm.urls(for: .libraryDirectory, in: .userDomainMask)[0])
+        directories.append(fm.temporaryDirectory)
+        for dir in directories {
+            total += directorySize(dir)
+        }
+        return total
     }
 
     static func directorySize(_ url: URL) -> Int64 {
