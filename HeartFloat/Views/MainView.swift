@@ -6,6 +6,9 @@ struct MainView: View {
 
     @State private var showSettings = false
     @State private var blink = false
+    @State private var showStopConfirm = false
+    @State private var showDisconnectConfirm = false
+    @State private var showModePicker = false
 
     private let themeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
 
@@ -33,6 +36,69 @@ struct MainView: View {
                 ConnectionOverlayView(viewModel: viewModel)
                     .transition(.opacity)
                     .zIndex(10)
+            }
+
+            // 停止记录确认（防止误触）
+            if showStopConfirm {
+                GlassAlertOverlay(
+                    iconName: "stop.circle.fill",
+                    iconColor: .red,
+                    title: "停止记录？",
+                    message: "本次已记录 \(HeartRateRecording.format(duration: Date().timeIntervalSince(viewModel.recordingStartedAt ?? Date())))，停止后自动保存",
+                    confirmTitle: "停止并保存",
+                    confirmDestructive: true,
+                    onConfirm: {
+                        viewModel.stopRecording()
+                        showStopConfirm = false
+                    },
+                    onCancel: { showStopConfirm = false }
+                )
+                .transition(.opacity)
+                .zIndex(11)
+            }
+
+            // 记录中点断开连接：先停止并保存再断开
+            if showDisconnectConfirm {
+                GlassAlertOverlay(
+                    iconName: "antenna.radiowaves.left.and.right.slash",
+                    iconColor: .orange,
+                    title: "心率记录进行中",
+                    message: "断开连接将停止记录并自动保存本次数据",
+                    confirmTitle: "停止记录并断开",
+                    confirmDestructive: true,
+                    onConfirm: {
+                        viewModel.stopRecording()
+                        viewModel.disconnect()
+                        showDisconnectConfirm = false
+                    },
+                    onCancel: { showDisconnectConfirm = false }
+                )
+                .transition(.opacity)
+                .zIndex(11)
+            }
+
+            // 长按记录按钮：选择手动 / Auto 模式
+            if showModePicker {
+                ModeSelectOverlay(viewModel: viewModel) { showModePicker = false }
+                    .transition(.opacity)
+                    .zIndex(12)
+            }
+
+            // 上次异常退出遗留的未保存记录（最高优先级，必须二选一）
+            if let pending = viewModel.pendingUnsavedRecording {
+                let duration = pending.samples.last?.t.timeIntervalSince(pending.startedAt) ?? 0
+                GlassAlertOverlay(
+                    iconName: "waveform.path.ecg.circle",
+                    iconColor: themeColor,
+                    title: "发现未保存的记录",
+                    message: "上次退出时有 \(pending.samples.count) 个采样点（\(HeartRateRecording.format(duration: duration))）尚未保存",
+                    confirmTitle: "保存",
+                    cancelTitle: "丢弃",
+                    onConfirm: { viewModel.keepPendingUnsaved() },
+                    onCancel: { viewModel.discardPendingUnsaved() }
+                )
+                .transition(.opacity)
+                .zIndex(20)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.showConnectionOverlay)
@@ -94,11 +160,12 @@ struct MainView: View {
 
     private var chartCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(spacing: 8) {
                 Text("实时心率")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.secondary)
                 Spacer()
+                recordingChip
                 Text("最近 60 秒")
                     .font(.system(size: 11))
                     .foregroundColor(Color(.tertiaryLabel))
@@ -120,7 +187,12 @@ struct MainView: View {
             HStack(spacing: 10) {
                 Button(action: {
                     if viewModel.connectionState == .connected {
-                        viewModel.disconnect()
+                        // 记录进行中先经确认弹窗停止保存，避免误触丢失
+                        if viewModel.isRecording {
+                            showDisconnectConfirm = true
+                        } else {
+                            viewModel.disconnect()
+                        }
                     } else if viewModel.connectionState != .connecting {
                         viewModel.connect()
                     }
@@ -158,49 +230,61 @@ struct MainView: View {
                 .disabled(viewModel.connectionState != .connected)
                 .opacity(viewModel.connectionState == .connected ? 1 : 0.55)
             }
-
-            recordingButton
         }
         .padding(.top, 2)
     }
 
-    // MARK: - 心率记录按钮
+    // MARK: - 记录入口（曲线卡右上角紧凑胶囊，防误触；点按开始/停止，长按选模式）
 
-    private var recordingButton: some View {
-        Button(action: {
+    private var recordingChip: some View {
+        Group {
             if viewModel.isRecording {
-                viewModel.stopRecording()
-            } else {
-                viewModel.startRecording()
-            }
-        }) {
-            HStack(spacing: 8) {
-                if viewModel.isRecording {
+                HStack(spacing: 4) {
                     Circle()
                         .fill(Color.white)
-                        .frame(width: 9, height: 9)
-                        .opacity(blink ? 0.25 : 1)
+                        .frame(width: 6, height: 6)
+                        .opacity(blink ? 0.3 : 1)
                         .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: blink)
                         .onAppear { blink = true }
-                    Text("停止记录")
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
                         Text(HeartRateRecording.format(duration: Date().timeIntervalSince(viewModel.recordingStartedAt ?? Date())))
-                            .monospacedDigit()
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     }
-                } else {
-                    Image(systemName: "record.circle")
-                    Text("开始记录")
+                    if viewModel.autoRecording {
+                        Text("A")
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 14, height: 14)
+                            .background(Color.white.opacity(0.28), in: Circle())
+                    }
                 }
+                .foregroundColor(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Color.red, in: Capsule())
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: "record.circle")
+                        .font(.system(size: 12))
+                    Text("记录")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(themeColor)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(themeColor.opacity(0.12), in: Capsule())
             }
-            .font(.system(size: 15, weight: .semibold))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(viewModel.isRecording ? Color.red : themeColor.opacity(0.14))
-            .foregroundColor(viewModel.isRecording ? .white : themeColor)
-            .cornerRadius(14)
         }
-        .disabled(viewModel.connectionState != .connected && !viewModel.isRecording)
-        .opacity(viewModel.connectionState != .connected && !viewModel.isRecording ? 0.5 : 1)
+        .opacity(viewModel.connectionState == .connected || viewModel.isRecording ? 1 : 0.45)
+        .onLongPressGesture(minimumDuration: 0.5) {
+            showModePicker = true
+        }
+        .onTapGesture {
+            if viewModel.isRecording {
+                showStopConfirm = true
+            } else if viewModel.connectionState == .connected {
+                viewModel.startRecording()
+            }
+        }
     }
 
     private var statusText: String {
@@ -579,6 +663,136 @@ struct ConnectionOverlayView: View {
                 .background(Color(.systemGray5))
                 .foregroundColor(.primary)
                 .cornerRadius(12)
+        }
+    }
+}
+
+// MARK: - 通用毛玻璃确认弹窗
+
+struct GlassAlertOverlay: View {
+    var iconName: String
+    var iconColor: Color
+    var title: String
+    var message: String
+    var confirmTitle: String
+    var confirmDestructive = false
+    var cancelTitle = "取消"
+    var onConfirm: () -> Void
+    var onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { } // 阻断点击穿透
+
+            VStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.system(size: 50))
+                    .foregroundColor(iconColor)
+
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+
+                Text(message)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 10) {
+                    Button(action: onConfirm) {
+                        Text(confirmTitle)
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(confirmDestructive ? Color.red : Color(red: 1.0, green: 0.42, blue: 0.42))
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                    }
+                    Button(action: onCancel) {
+                        Text(cancelTitle)
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color(.systemGray5))
+                            .foregroundColor(.primary)
+                            .cornerRadius(12)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .padding(22)
+            .frame(width: 310)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+        }
+    }
+}
+
+// MARK: - 记录模式选择弹窗（长按记录按钮打开）
+
+struct ModeSelectOverlay: View {
+    @ObservedObject var viewModel: HeartRateViewModel
+    var onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { onClose() }
+
+            VStack(spacing: 10) {
+                Text("记录模式")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .padding(.bottom, 2)
+
+                modeRow(
+                    title: "手动模式",
+                    subtitle: "手动开始，停止时确认后保存",
+                    isSelected: !viewModel.autoRecording
+                ) {
+                    viewModel.autoRecording = false
+                    onClose()
+                }
+
+                modeRow(
+                    title: "Auto 模式",
+                    subtitle: "连接成功自动记录，断开时自动保存",
+                    isSelected: viewModel.autoRecording
+                ) {
+                    viewModel.autoRecording = true
+                    onClose()
+                }
+            }
+            .padding(22)
+            .frame(width: 310)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+        }
+    }
+
+    private func modeRow(title: String, subtitle: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.primary)
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(isSelected ? Color(red: 1.0, green: 0.42, blue: 0.42) : Color(.systemGray3))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(isSelected ? Color(red: 1.0, green: 0.42, blue: 0.42).opacity(0.10) : Color(.systemGray6).opacity(0.7))
+            .cornerRadius(12)
         }
     }
 }

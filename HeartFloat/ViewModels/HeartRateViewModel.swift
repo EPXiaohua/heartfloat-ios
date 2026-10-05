@@ -16,6 +16,15 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var recordingStartedAt: Date?
     @Published var recordings: [HeartRateRecording] = []
+    /// 记录模式：Auto = 心率通知就绪后自动开始记录，断开时自动保存
+    @Published var autoRecording: Bool = UserDefaults.standard.bool(forKey: "recordingAutoMode") {
+        didSet {
+            guard oldValue != autoRecording else { return }
+            UserDefaults.standard.set(autoRecording, forKey: "recordingAutoMode")
+        }
+    }
+    /// 上次异常退出遗留的未保存记录（启动时检测，弹窗询问保存或丢弃）
+    @Published var pendingUnsavedRecording: HeartRateRecording?
     /// 当前连接的设备名
     @Published var connectedDeviceName: String = ""
     /// 心率采样点（时间戳 + 值）：每次采样无条件追加，曲线按绝对时间轴绘制，
@@ -46,6 +55,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
     override init() {
         super.init()
         recordings = HeartRateRecordingStore.loadAll()
+        pendingUnsavedRecording = HeartRateRecordingStore.loadUnsaved()
         setupBindings()
     }
 
@@ -72,8 +82,13 @@ class HeartRateViewModel: NSObject, ObservableObject {
                     self.lastSampleAt = now
 
                     // 记录模式下无限追加，不受 60 秒窗口限制
-                    if self.isRecording {
-                        self.activeRecording?.samples.append(.init(t: now, bpm: rate))
+                    if self.isRecording, var session = self.activeRecording {
+                        session.samples.append(.init(t: now, bpm: rate))
+                        self.activeRecording = session
+                        // 每 5 个采样点快照一次，应用异常退出后可恢复保存
+                        if session.samples.count % 5 == 0 {
+                            HeartRateRecordingStore.saveUnsaved(session)
+                        }
                     }
                 }
 
@@ -92,6 +107,10 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
                 // 断开后读数归零、曲线清空，重新连接后从头统计
                 if state == .disconnected || state == .failed {
+                    // 记录进行中随断连结束：数据源已消失，自动保存本次会话
+                    if self.isRecording {
+                        self.stopRecording()
+                    }
                     self.heartRate = 0
                     self.pipOverlay?.update(heartRate: 0)
                     self.isContact = false
@@ -105,6 +124,10 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
                 // 连接成功后展示勾动画片刻再自动关闭弹窗
                 if state == .connected {
+                    // Auto 模式：心率通知就绪即自动开始记录
+                    if self.autoRecording && !self.isRecording {
+                        self.startRecording()
+                    }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
                         self?.showConnectionOverlay = false
                     }
@@ -164,10 +187,29 @@ class HeartRateViewModel: NSObject, ObservableObject {
         isRecording = false
         activeRecording = nil
         recordingStartedAt = nil
+        HeartRateRecordingStore.removeUnsaved()
         // 少于两个采样点的会话没有查看价值，不保存
         guard session.samples.count >= 2 else { return }
         HeartRateRecordingStore.save(session)
         recordings = HeartRateRecordingStore.loadAll()
+    }
+
+    /// 保存上次异常退出遗留的记录（时长以最后一个采样点为准）
+    func keepPendingUnsaved() {
+        guard var session = pendingUnsavedRecording else { return }
+        session.endedAt = session.samples.last?.t ?? session.startedAt
+        HeartRateRecordingStore.save(session)
+        HeartRateRecordingStore.removeUnsaved()
+        recordings = HeartRateRecordingStore.loadAll()
+        pendingUnsavedRecording = nil
+    }
+
+    /// 丢弃上次异常退出遗留的记录；若新会话已在写快照则保留快照文件
+    func discardPendingUnsaved() {
+        if activeRecording == nil {
+            HeartRateRecordingStore.removeUnsaved()
+        }
+        pendingUnsavedRecording = nil
     }
 
     func deleteRecordings(at offsets: IndexSet) {
@@ -576,5 +618,28 @@ enum HeartRateRecordingStore {
     static func delete(_ recording: HeartRateRecording) {
         let url = directory.appendingPathComponent("\(recording.id.uuidString).json")
         try? FileManager.default.removeItem(at: url)
+    }
+
+    /// 未保存会话快照（应用异常退出后的恢复依据），与正式记录同目录，不会被清理缓存误删
+    static var unsavedURL: URL {
+        directory.appendingPathComponent("unsaved.json")
+    }
+
+    static func saveUnsaved(_ recording: HeartRateRecording) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(recording) else { return }
+        try? data.write(to: unsavedURL, options: .atomic)
+    }
+
+    static func loadUnsaved() -> HeartRateRecording? {
+        guard let data = try? Data(contentsOf: unsavedURL) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(HeartRateRecording.self, from: data)
+    }
+
+    static func removeUnsaved() {
+        try? FileManager.default.removeItem(at: unsavedURL)
     }
 }
