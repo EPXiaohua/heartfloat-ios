@@ -5,6 +5,7 @@ struct MainView: View {
     @EnvironmentObject var settings: SettingsManager
 
     @State private var showSettings = false
+    @State private var blink = false
 
     private let themeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
 
@@ -157,8 +158,49 @@ struct MainView: View {
                 .disabled(viewModel.connectionState != .connected)
                 .opacity(viewModel.connectionState == .connected ? 1 : 0.55)
             }
+
+            recordingButton
         }
         .padding(.top, 2)
+    }
+
+    // MARK: - 心率记录按钮
+
+    private var recordingButton: some View {
+        Button(action: {
+            if viewModel.isRecording {
+                viewModel.stopRecording()
+            } else {
+                viewModel.startRecording()
+            }
+        }) {
+            HStack(spacing: 8) {
+                if viewModel.isRecording {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 9, height: 9)
+                        .opacity(blink ? 0.25 : 1)
+                        .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: blink)
+                        .onAppear { blink = true }
+                    Text("停止记录")
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        Text(HeartRateRecording.format(duration: Date().timeIntervalSince(viewModel.recordingStartedAt ?? Date())))
+                            .monospacedDigit()
+                    }
+                } else {
+                    Image(systemName: "record.circle")
+                    Text("开始记录")
+                }
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(viewModel.isRecording ? Color.red : themeColor.opacity(0.14))
+            .foregroundColor(viewModel.isRecording ? .white : themeColor)
+            .cornerRadius(14)
+        }
+        .disabled(viewModel.connectionState != .connected && !viewModel.isRecording)
+        .opacity(viewModel.connectionState != .connected && !viewModel.isRecording ? 0.5 : 1)
     }
 
     private var statusText: String {

@@ -1,44 +1,35 @@
 import SwiftUI
+import Foundation
+
+// 记录图表主题色（与主界面曲线一致）
+private let recordingThemeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
+
+// MARK: - 设置主页（分组路径）
 
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsManager
     @EnvironmentObject var viewModel: HeartRateViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showingColorPicker = false
-    @State private var colorPickerTarget: ColorPickerTarget = .bpmNumber
-
-    @State private var httpPort: String = "8080"
-    @State private var showingHttpAlert = false
-    @State private var httpAlertMessage = ""
-
-    private let themeColor = Color(hex: "EC746F")
-
-    enum ColorPickerTarget {
-        case bpmNumber
-        case bpmLabel
-    }
-
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 24) {
-                    previewSection
-
-                    bpmNumberSettings
-
-                    bpmLabelSettings
-
-                    positionSettings
-
-                    backgroundSettings
-
-                    httpPushSettings
-
-                    presetSection
+            List {
+                Section {
+                    NavigationLink(destination: PipSettingsView()) {
+                        Label("悬浮窗设置", systemImage: "pip.enter")
+                    }
+                    NavigationLink(destination: RecordingsListView()) {
+                        Label("心率记录", systemImage: "waveform.path.ecg")
+                    }
+                    NavigationLink(destination: HttpPushSettingsView()) {
+                        Label("联网推送", systemImage: "dot.radiowaves.up.forward")
+                    }
+                    NavigationLink(destination: AboutView()) {
+                        Label("关于", systemImage: "info.circle")
+                    }
                 }
-                .padding()
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -48,6 +39,41 @@ struct SettingsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+}
+
+// MARK: - 悬浮窗设置
+
+struct PipSettingsView: View {
+    @EnvironmentObject var settings: SettingsManager
+
+    @State private var showingColorPicker = false
+    @State private var colorPickerTarget: ColorPickerTarget = .bpmNumber
+
+    enum ColorPickerTarget {
+        case bpmNumber
+        case bpmLabel
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                previewSection
+
+                bpmNumberSettings
+
+                bpmLabelSettings
+
+                positionSettings
+
+                backgroundSettings
+
+                presetSection
+            }
+            .padding()
+        }
+        .navigationTitle("悬浮窗设置")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingColorPicker) {
             ColorPickerSheet(
                 selectedColor: colorPickerTarget == .bpmNumber ? settings.bpmNumberColor : settings.bpmLabelColor,
@@ -59,11 +85,6 @@ struct SettingsView: View {
                     }
                 }
             )
-        }
-        .alert("提示", isPresented: $showingHttpAlert) {
-            Button("确定", role: .cancel) {}
-        } message: {
-            Text(httpAlertMessage)
         }
     }
 
@@ -212,7 +233,79 @@ struct SettingsView: View {
         .cornerRadius(12)
     }
 
-    private var httpPushSettings: some View {
+    private var presetSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("预设方案")
+                .font(.system(size: 16, weight: .bold))
+
+            HStack(spacing: 12) {
+                Button(action: { settings.applyPresetClassic() }) {
+                    VStack {
+                        Circle()
+                            .fill(Color(red: 1.0, green: 0.42, blue: 0.42))
+                            .frame(width: 40, height: 40)
+                        Text("经典")
+                            .font(.system(size: 12))
+                    }
+                }
+                .foregroundColor(.primary)
+
+                Button(action: { settings.applyPresetNeon() }) {
+                    VStack {
+                        Circle()
+                            .fill(Color(red: 0.0, green: 1.0, blue: 0.53))
+                            .frame(width: 40, height: 40)
+                        Text("霓虹")
+                            .font(.system(size: 12))
+                    }
+                }
+                .foregroundColor(.primary)
+
+                Button(action: { settings.applyPresetOcean() }) {
+                    VStack {
+                        Circle()
+                            .fill(Color(red: 0.0, green: 0.75, blue: 1.0))
+                            .frame(width: 40, height: 40)
+                        Text("海洋")
+                            .font(.system(size: 12))
+                    }
+                }
+                .foregroundColor(.primary)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - 联网推送
+
+struct HttpPushSettingsView: View {
+    @EnvironmentObject var settings: SettingsManager
+    @EnvironmentObject var viewModel: HeartRateViewModel
+
+    @State private var httpPort: String = "8080"
+    @State private var showingHttpAlert = false
+    @State private var httpAlertMessage = ""
+
+    private let themeColor = Color(hex: "EC746F")
+
+    var body: some View {
+        ScrollView {
+            httpPushSection
+                .padding()
+        }
+        .navigationTitle("联网推送")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("提示", isPresented: $showingHttpAlert) {
+            Button("确定", role: .cancel) {}
+        } message: {
+            Text(httpAlertMessage)
+        }
+    }
+
+    private var httpPushSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("联网推送")
                 .font(.system(size: 16, weight: .bold))
@@ -276,50 +369,444 @@ struct SettingsView: View {
         .background(Color(.systemGray6))
         .cornerRadius(12)
     }
+}
 
-    private var presetSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("预设方案")
-                .font(.system(size: 16, weight: .bold))
+// MARK: - 心率记录列表
 
-            HStack(spacing: 12) {
-                Button(action: { settings.applyPresetClassic() }) {
-                    VStack {
-                        Circle()
-                            .fill(Color(red: 1.0, green: 0.42, blue: 0.42))
-                            .frame(width: 40, height: 40)
-                        Text("经典")
-                            .font(.system(size: 12))
-                    }
+struct RecordingsListView: View {
+    @EnvironmentObject var viewModel: HeartRateViewModel
+
+    var body: some View {
+        Group {
+            if viewModel.recordings.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 40))
+                        .foregroundColor(Color(.tertiaryLabel))
+                    Text("还没有心率记录")
+                        .font(.system(size: 15, weight: .medium))
+                    Text("连接手环后，在主界面点「开始记录」")
+                        .font(.system(size: 12))
                 }
-                .foregroundColor(.primary)
-
-                Button(action: { settings.applyPresetNeon() }) {
-                    VStack {
-                        Circle()
-                            .fill(Color(red: 0.0, green: 1.0, blue: 0.53))
-                            .frame(width: 40, height: 40)
-                        Text("霓虹")
-                            .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(viewModel.recordings) { recording in
+                        NavigationLink(destination: RecordingDetailView(recording: recording)) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(Self.dateText(recording.startedAt))
+                                    .font(.system(size: 15, weight: .medium))
+                                HStack(spacing: 14) {
+                                    Text("时长 \(recording.durationText)")
+                                    Text("平均 \(recording.averageBpm.map { String(format: "%.0f", $0) } ?? "--") BPM")
+                                    Text("\(recording.samples.count) 点")
+                                }
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
                     }
+                    .onDelete { viewModel.deleteRecordings(at: $0) }
                 }
-                .foregroundColor(.primary)
-
-                Button(action: { settings.applyPresetOcean() }) {
-                    VStack {
-                        Circle()
-                            .fill(Color(red: 0.0, green: 0.75, blue: 1.0))
-                            .frame(width: 40, height: 40)
-                        Text("海洋")
-                            .font(.system(size: 12))
-                    }
-                }
-                .foregroundColor(.primary)
+                .listStyle(.insetGrouped)
             }
         }
-        .padding()
+        .navigationTitle("心率记录")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private static func dateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - 记录详情（大图 + 点击查询 + 导出）
+
+struct RecordingDetailView: View {
+    let recording: HeartRateRecording
+
+    @State private var shareItem: ShareItem?
+
+    struct ShareItem: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                statsSection
+
+                RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor)
+                    .frame(height: 300)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(14)
+
+                exportMenu
+            }
+            .padding()
+        }
+        .navigationTitle("记录详情")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $shareItem) { item in
+            ActivityShareSheet(items: [item.url])
+        }
+    }
+
+    private var statsSection: some View {
+        HStack(spacing: 0) {
+            statItem("平均", recording.averageBpm.map { String(format: "%.0f", $0) } ?? "--")
+            statItem("最低", recording.minBpm.map(String.init) ?? "--")
+            statItem("最高", recording.maxBpm.map(String.init) ?? "--")
+            statItem("时长", recording.durationText)
+        }
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
         .background(Color(.systemGray6))
-        .cornerRadius(12)
+        .cornerRadius(14)
+    }
+
+    private func statItem(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundColor(recordingThemeColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var exportMenu: some View {
+        Menu {
+            Button(action: { exportFile(ext: "csv", text: csvText) }) {
+                Label("导出 CSV（表格）", systemImage: "tablecells")
+            }
+            Button(action: { exportFile(ext: "json", text: jsonText) }) {
+                Label("导出 JSON（原始数据）", systemImage: "curlybraces.square")
+            }
+        } label: {
+            HStack {
+                Image(systemName: "square.and.arrow.up")
+                Text("导出记录")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(recordingThemeColor)
+            .foregroundColor(.white)
+            .cornerRadius(14)
+        }
+    }
+
+    private var csvText: String {
+        var lines = ["timestamp,bpm"]
+        for sample in recording.samples {
+            lines.append("\(HeartRateRecordingStore.iso8601.string(from: sample.t)),\(sample.bpm)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var jsonText: String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(recording),
+              let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
+    }
+
+    private func exportFile(ext: String, text: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        let name = "心率记录_\(formatter.string(from: recording.startedAt)).\(ext)"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        try? text.write(to: url, atomically: true, encoding: .utf8)
+        shareItem = ShareItem(url: url)
+    }
+}
+
+// MARK: - 记录图表（Canvas 绘制：整数 BPM 刻度 + 时间刻度 + 点击查询）
+
+struct RecordingChartView: View {
+    let samples: [HeartRateRecording.Sample]
+    let themeColor: Color
+
+    @State private var queryIndex: Int?
+
+    var body: some View {
+        GeometryReader { geo in
+            let layout = RecordingChartLayout(samples: samples, size: geo.size)
+            Canvas { context, size in
+                draw(in: &context, size: size, layout: layout)
+            }
+            .overlay(alignment: .top) {
+                if let index = queryIndex, samples.indices.contains(index) {
+                    Text("\(Self.timeText(samples[index].t)) · \(samples[index].bpm) BPM")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.top, 6)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { queryIndex = layout.nearestIndex(in: samples, at: $0.location) }
+                    .onEnded { queryIndex = layout.nearestIndex(in: samples, at: $0.location) }
+            )
+        }
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize, layout: RecordingChartLayout) {
+        let plot = layout.plot
+
+        guard !samples.isEmpty else {
+            context.draw(
+                Text("没有采样数据").font(.system(size: 13)).foregroundColor(Color(.tertiaryLabel)),
+                at: CGPoint(x: size.width / 2, y: size.height / 2)
+            )
+            return
+        }
+
+        // 水平 BPM 网格：刻度对齐整数（步长取 1/2/5×10ⁿ）
+        let span = layout.ymax - layout.ymin
+        let rawStep = span / 5
+        let magnitude = pow(10.0, floor(log10(rawStep)))
+        let normalized = rawStep / magnitude
+        let step = (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 7 ? 5 : 10) * magnitude
+        var value = (layout.ymin / step).rounded(.up) * step
+        while value <= layout.ymax + 0.001 {
+            let y = layout.y(value)
+            var grid = Path()
+            grid.move(to: CGPoint(x: plot.minX, y: y))
+            grid.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(grid, with: .color(Color(.systemGray5)), lineWidth: 0.8)
+            context.draw(
+                Text("\(Int(value.rounded()))").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(.tertiaryLabel)),
+                at: CGPoint(x: plot.minX - 18, y: y)
+            )
+            value += step
+        }
+
+        // 垂直时间刻度：5 等分，短记录显示 分:秒，长记录显示 时:分
+        let total = layout.xmax.timeIntervalSince(layout.xmin)
+        let formatter = DateFormatter()
+        formatter.dateFormat = total < 90 ? "mm:ss" : "HH:mm"
+        for i in 0...4 {
+            let fraction = Double(i) / 4.0
+            let date = layout.xmin.addingTimeInterval(fraction * total)
+            let x = plot.minX + CGFloat(fraction) * plot.width
+            var grid = Path()
+            grid.move(to: CGPoint(x: x, y: plot.minY))
+            grid.addLine(to: CGPoint(x: x, y: plot.maxY))
+            context.stroke(grid, with: .color(Color(.systemGray5)), lineWidth: 0.8)
+            context.draw(
+                Text(formatter.string(from: date)).font(.system(size: 9)).foregroundColor(Color(.tertiaryLabel)),
+                at: CGPoint(x: x, y: plot.maxY + 12)
+            )
+        }
+
+        // 剪裁绘图区
+        context.clip(to: Path(plot))
+
+        // 折线：直线段连接全部采样点
+        var line = Path()
+        for (index, sample) in samples.enumerated() {
+            let point = CGPoint(x: layout.x(sample.t), y: layout.y(Double(sample.bpm)))
+            if index == 0 {
+                line.move(to: point)
+            } else {
+                line.addLine(to: point)
+            }
+        }
+
+        // 渐变填充
+        var fill = line
+        fill.addLine(to: CGPoint(x: layout.x(samples[samples.count - 1].t), y: plot.maxY))
+        fill.addLine(to: CGPoint(x: plot.minX, y: plot.maxY))
+        fill.closeSubpath()
+        context.fill(fill, with: .linearGradient(
+            Gradient(colors: [themeColor.opacity(0.28), themeColor.opacity(0.02)]),
+            startPoint: CGPoint(x: 0, y: plot.minY),
+            endPoint: CGPoint(x: 0, y: plot.maxY)
+        ))
+
+        // 折线描边
+        context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+
+        // 点击查询指示：竖直虚线 + 高亮圆点
+        if let index = queryIndex, samples.indices.contains(index) {
+            let sample = samples[index]
+            let x = layout.x(sample.t)
+            let y = layout.y(Double(sample.bpm))
+            var guide = Path()
+            guide.move(to: CGPoint(x: x, y: plot.minY))
+            guide.addLine(to: CGPoint(x: x, y: plot.maxY))
+            context.stroke(guide, with: .color(Color.secondary.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            context.fill(
+                Path(ellipseIn: CGRect(x: x - 4.5, y: y - 4.5, width: 9, height: 9)),
+                with: .color(themeColor)
+            )
+            context.stroke(
+                Path(ellipseIn: CGRect(x: x - 6.5, y: y - 6.5, width: 13, height: 13)),
+                with: .color(.white),
+                lineWidth: 1.5
+            )
+        }
+    }
+
+    private static func timeText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
+/// 图表布局：数据范围 → 坐标映射（绘制与手势反查共用）
+private struct RecordingChartLayout {
+    let plot: CGRect
+    let xmin: Date
+    let xmax: Date
+    let ymin: Double
+    let ymax: Double
+
+    init(samples: [HeartRateRecording.Sample], size: CGSize) {
+        plot = CGRect(x: 40, y: 8, width: max(size.width - 52, 10), height: max(size.height - 30, 10))
+        let first = samples.first?.t ?? Date()
+        let last = samples.last?.t ?? first
+        xmin = first
+        xmax = max(last, first.addingTimeInterval(10))
+        let values = samples.map { Double($0.bpm) }
+        let vmin = values.min() ?? 60
+        let vmax = values.max() ?? 100
+        let span = max(vmax - vmin, 8) * 1.15
+        let mid = (vmin + vmax) / 2
+        ymin = mid - span / 2
+        ymax = mid + span / 2
+    }
+
+    func x(_ t: Date) -> CGFloat {
+        let total = xmax.timeIntervalSince(xmin)
+        guard total > 0 else { return plot.midX }
+        return plot.minX + CGFloat(t.timeIntervalSince(xmin) / total) * plot.width
+    }
+
+    func y(_ v: Double) -> CGFloat {
+        plot.maxY - CGFloat((v - ymin) / max(ymax - ymin, 0.001)) * plot.height
+    }
+
+    /// 点击位置 → 最近的采样点下标（二分）
+    func nearestIndex(in samples: [HeartRateRecording.Sample], at point: CGPoint) -> Int? {
+        guard !samples.isEmpty, plot.width > 0 else { return nil }
+        let fraction = min(max((point.x - plot.minX) / plot.width, 0), 1)
+        let total = xmax.timeIntervalSince(xmin)
+        let target = xmin.addingTimeInterval(Double(fraction) * total)
+        var lo = 0
+        var hi = samples.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if samples[mid].t < target {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        if lo == 0 { return 0 }
+        if lo == samples.count { return samples.count - 1 }
+        let before = abs(samples[lo - 1].t.timeIntervalSince(target))
+        let after = abs(samples[lo].t.timeIntervalSince(target))
+        return before < after ? lo - 1 : lo
+    }
+}
+
+// MARK: - 系统分享面板
+
+struct ActivityShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - 关于
+
+struct AboutView: View {
+    private let repoURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios")!
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                VStack(spacing: 6) {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 52))
+                        .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
+                        .padding(.bottom, 2)
+                    Text("心率悬浮窗")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                    Text("版本 \(Self.appVersion)")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 20)
+
+                infoCard(title: "应用简介") {
+                    Text("通过蓝牙连接小米手环等标准心率设备，实时查看心率数值与曲线，支持画中画悬浮窗常亮展示、长时间心率记录与多格式数据导出。")
+                        .font(.system(size: 14))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                infoCard(title: "项目信息") {
+                    VStack(spacing: 10) {
+                        HStack {
+                            Text("当前版本")
+                            Spacer()
+                            Text(Self.appVersion)
+                                .foregroundColor(.secondary)
+                        }
+                        Divider()
+                        HStack {
+                            Text("仓库地址")
+                            Spacer()
+                            Link("EPXiaohua/heartfloat-ios", destination: repoURL)
+                        }
+                    }
+                    .font(.system(size: 14))
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("关于")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// 版本号从打包配置读取（Info.plist 的 CFBundleShortVersionString），不写死
+    static var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "未知"
+    }
+
+    private func infoCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 15, weight: .bold))
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGray6))
+        .cornerRadius(14)
     }
 }
 

@@ -12,6 +12,10 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var logMessages: [String] = []
     @Published var isPipActive: Bool = false
     @Published var showConnectionOverlay: Bool = false
+    /// 心率记录状态（记录模式下采样点无限追加，不受 60 秒窗口限制）
+    @Published var isRecording = false
+    @Published var recordingStartedAt: Date?
+    @Published var recordings: [HeartRateRecording] = []
     /// 心率采样点（时间戳 + 值）：每次采样无条件追加，曲线按绝对时间轴绘制，
     /// 视口跟随最新点，同值采样表现为水平线平移（形态不变），值变化才出现形态变化
     var heartRateSamples: [(Date, Double)] = []
@@ -35,9 +39,11 @@ class HeartRateViewModel: NSObject, ObservableObject {
     private var pipCarrierView: UIView?
     private var pipOverlay: HeartRatePipView?
     private var userRequestedStop = false
+    private var activeRecording: HeartRateRecording?
 
     override init() {
         super.init()
+        recordings = HeartRateRecordingStore.loadAll()
         setupBindings()
     }
 
@@ -62,6 +68,11 @@ class HeartRateViewModel: NSObject, ObservableObject {
                         self.heartRateSamples.removeFirst()
                     }
                     self.lastSampleAt = now
+
+                    // 记录模式下无限追加，不受 60 秒窗口限制
+                    if self.isRecording {
+                        self.activeRecording?.samples.append(.init(t: now, bpm: rate))
+                    }
                 }
 
                 // 数字大字 / 画中画仅在值变化时刷新
@@ -129,6 +140,35 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
     func disconnect() {
         bleService.disconnect()
+    }
+
+    // MARK: - 心率记录
+
+    func startRecording() {
+        guard !isRecording else { return }
+        let session = HeartRateRecording(startedAt: Date(), endedAt: Date())
+        activeRecording = session
+        recordingStartedAt = session.startedAt
+        isRecording = true
+    }
+
+    func stopRecording() {
+        guard isRecording, var session = activeRecording else { return }
+        session.endedAt = Date()
+        isRecording = false
+        activeRecording = nil
+        recordingStartedAt = nil
+        // 少于两个采样点的会话没有查看价值，不保存
+        guard session.samples.count >= 2 else { return }
+        HeartRateRecordingStore.save(session)
+        recordings = HeartRateRecordingStore.loadAll()
+    }
+
+    func deleteRecordings(at offsets: IndexSet) {
+        for index in offsets {
+            HeartRateRecordingStore.delete(recordings[index])
+        }
+        recordings = HeartRateRecordingStore.loadAll()
     }
 
     func togglePip() {
@@ -458,5 +498,77 @@ final class HeartRatePipView: UIView {
             numberLabel.frame = CGRect(x: cx - numberW / 2, y: cy - numberSize.height / 2, width: numberW, height: numberSize.height)
             bpmLabel.frame = CGRect(x: cx - labelW / 2, y: numberLabel.frame.maxY + spacing, width: labelW, height: labelSize.height)
         }
+    }
+}
+
+// MARK: - 心率记录会话（文件持久化）
+
+struct HeartRateRecording: Identifiable, Codable {
+    struct Sample: Codable {
+        /// 采样时间
+        let t: Date
+        /// 心率值（BPM）
+        let bpm: Int
+    }
+
+    var id = UUID()
+    var startedAt: Date
+    var endedAt: Date
+    var samples: [Sample] = []
+
+    var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
+    var durationText: String { Self.format(duration: duration) }
+    var averageBpm: Double? {
+        guard !samples.isEmpty else { return nil }
+        return Double(samples.reduce(0) { $0 + $1.bpm }) / Double(samples.count)
+    }
+    var minBpm: Int? { samples.map(\.bpm).min() }
+    var maxBpm: Int? { samples.map(\.bpm).max() }
+
+    /// 时长格式化：不足 1 小时显示 分:秒，超过显示 时:分:秒
+    static func format(duration: TimeInterval) -> String {
+        let s = max(0, Int(duration))
+        if s >= 3600 {
+            return String(format: "%d:%02d:%02d", s / 3600, s % 3600 / 60, s % 60)
+        }
+        return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+}
+
+enum HeartRateRecordingStore {
+    static let iso8601 = ISO8601DateFormatter()
+
+    static var directory: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent("Recordings", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func loadAll() -> [HeartRateRecording] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return files
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .compactMap { url in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? decoder.decode(HeartRateRecording.self, from: data)
+            }
+            .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    static func save(_ recording: HeartRateRecording) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(recording) else { return }
+        let url = directory.appendingPathComponent("\(recording.id.uuidString).json")
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func delete(_ recording: HeartRateRecording) {
+        let url = directory.appendingPathComponent("\(recording.id.uuidString).json")
+        try? FileManager.default.removeItem(at: url)
     }
 }
