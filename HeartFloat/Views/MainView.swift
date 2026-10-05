@@ -285,15 +285,15 @@ struct HeartRateChartView: View {
                 Text(hint).font(.system(size: 13)).foregroundColor(Color(.tertiaryLabel)),
                 at: CGPoint(x: size.width / 2, y: size.height / 2)
             )
-            drawGrid(plot: plot, in: &context, lo: 50, hi: 90)
+            drawGrid(plot: plot, in: &context, lo: 50, hi: 90, viewport: 60)
             return
         }
 
-        // 值域目标：由窗口内数据范围决定（当前心率 vs 整体范围做对比）
+        // 值域目标：紧贴 60 秒内数据的实际范围（含少量边距），小波动也能放大看出细节
         let vmin = validValues.min() ?? 60
         let vmax = validValues.max() ?? 100
         let mid = (vmin + vmax) / 2
-        let span = max(vmax - vmin, 20) * 1.2 + 4
+        let span = max(vmax - vmin, 6) * 1.15
         let targetLo = mid - span / 2
         let targetHi = mid + span / 2
 
@@ -313,7 +313,14 @@ struct HeartRateChartView: View {
         viewModel.displayLo = lo
         viewModel.displayHi = hi
 
-        drawGrid(plot: plot, in: &context, lo: lo, hi: hi)
+        // 时间 → x 坐标：视口右缘跟随最新采样点，两次采样之间画面完全静止。
+        // 视口宽度自适应：统计不足 60 秒时全部数据拉伸铺满，
+        // 超过 60 秒后固定 60 秒窗口跟随最新点滚动
+        let base = viewModel.lastSampleAt
+        let oldest = samples.first?.0 ?? base
+        let viewport = min(60.0, max(base.timeIntervalSince(oldest), 5.0))
+
+        drawGrid(plot: plot, in: &context, lo: lo, hi: hi, viewport: viewport)
 
         // 值 → y 坐标。超界点不压平，由绘图区剪裁自然裁掉，保持连续
         func yFor(_ v: Double) -> CGFloat {
@@ -321,13 +328,9 @@ struct HeartRateChartView: View {
             return plot.maxY - CGFloat(ratio) * plot.height
         }
 
-        // 时间 → x 坐标：绝对时间轴，视口右缘跟随最新采样点。
-        // 每次采样视口左移一格：同值时是水平线平移（形态不变、几乎无感），
-        // 值变化时波形形态才发生变化
-        let base = viewModel.lastSampleAt
         func xFor(_ t: Date) -> CGFloat {
             let age = base.timeIntervalSince(t) // 距最新采样的秒数
-            return plot.maxX - CGFloat(age / 60.0) * plot.width
+            return plot.maxX - CGFloat(age / viewport) * plot.width
         }
 
         // 剪裁绘图区
@@ -379,14 +382,15 @@ struct HeartRateChartView: View {
     }
 
     /// 网格线 + 横向 BPM 数值 + 纵向时间刻度
-    private func drawGrid(plot: CGRect, in context: inout GraphicsContext, lo: Double, hi: Double) {
+    private func drawGrid(plot: CGRect, in context: inout GraphicsContext, lo: Double, hi: Double, viewport: Double) {
         let labelColor = Color(.tertiaryLabel)
         let gridColor = Color(.systemGray5)
 
-        // 水平网格：上 / 中 / 下 三条，标注 BPM 值（连续值域，四舍五入显示）
-        let gridValues: [Double] = [hi, (hi + lo) / 2, lo]
-        for v in gridValues {
-            let y = plot.maxY - CGFloat((v - lo) / max(hi - lo, 1)) * plot.height
+        // 水平网格：6 等分 7 条，密集标注 BPM 值呈现更多心率细节
+        let divisions = 6.0
+        for i in 0...Int(divisions) {
+            let v = hi - (hi - lo) * Double(i) / divisions
+            let y = plot.minY + CGFloat(Double(i) / divisions) * plot.height
             var grid = Path()
             grid.move(to: CGPoint(x: plot.minX, y: y))
             grid.addLine(to: CGPoint(x: plot.maxX, y: y))
@@ -397,8 +401,13 @@ struct HeartRateChartView: View {
             )
         }
 
-        // 垂直网格：-60s（左）→ 现在（右）
-        let timeMarks: [(String, CGFloat)] = [("-60s", 0), ("-40s", 1.0 / 3.0), ("-20s", 2.0 / 3.0), ("现在", 1)]
+        // 垂直网格：时间刻度跟随实际视口宽度（拉伸期显示真实统计秒数，满窗口后 -60s → 现在）
+        let timeMarks: [(String, CGFloat)] = [
+            ("-\(Int(viewport.rounded()))s", 0),
+            ("-\(Int((viewport * 2.0 / 3.0).rounded()))s", 1.0 / 3.0),
+            ("-\(Int((viewport / 3.0).rounded()))s", 2.0 / 3.0),
+            ("现在", 1)
+        ]
         for (label, frac) in timeMarks {
             let x = plot.minX + frac * plot.width
             var grid = Path()
