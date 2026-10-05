@@ -386,11 +386,15 @@ struct HeartRateChartView: View {
         let labelColor = Color(.tertiaryLabel)
         let gridColor = Color(.systemGray5)
 
-        // 水平网格：6 等分 7 条，密集标注 BPM 值呈现更多心率细节
-        let divisions = 6.0
-        for i in 0...Int(divisions) {
-            let v = hi - (hi - lo) * Double(i) / divisions
-            let y = plot.minY + CGFloat(Double(i) / divisions) * plot.height
+        // 水平网格：刻度对齐整数 BPM（步长取 1/2/5×10ⁿ），标签数值与线的位置精确一致
+        let span = hi - lo
+        let rawStep = span / 5.5
+        let magnitude = pow(10.0, floor(log10(rawStep)))
+        let normalized = rawStep / magnitude
+        let step = (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 7 ? 5 : 10) * magnitude
+        var v = (lo / step).rounded(.up) * step
+        while v <= hi + 0.001 {
+            let y = plot.maxY - CGFloat((v - lo) / max(span, 0.001)) * plot.height
             var grid = Path()
             grid.move(to: CGPoint(x: plot.minX, y: y))
             grid.addLine(to: CGPoint(x: plot.maxX, y: y))
@@ -399,6 +403,7 @@ struct HeartRateChartView: View {
                 Text("\(Int(v.rounded()))").font(.system(size: 9, design: .monospaced)).foregroundColor(labelColor),
                 at: CGPoint(x: plot.minX - 14, y: y)
             )
+            v += step
         }
 
         // 垂直网格：时间刻度跟随实际视口宽度（拉伸期显示真实统计秒数，满窗口后 -60s → 现在）
