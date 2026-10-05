@@ -478,25 +478,40 @@ struct LandscapeChartView: View {
         ZStack {
             backgroundColor
 
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    if let index = queryIndex, recording.samples.indices.contains(index) {
-                        let sample = recording.samples[index]
-                        Text("\(Self.timeText(sample.t)) · \(sample.bpm) BPM")
-                            .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
-                    } else {
-                        Text("单击图表查看对应时间的心率")
-                            .foregroundColor(hintColor)
+            VStack(spacing: 12) {
+                // 顶栏：关闭 + 采样点数 + 横向缩放（同一行，不再叠压提示文字）
+                HStack(spacing: 12) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundColor(titleColor)
                     }
                     Spacer()
                     Text("共 \(recording.samples.count) 点")
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(hintColor)
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12))
+                            .foregroundColor(hintColor)
+                        Slider(
+                            value: Binding(get: { zoomValue }, set: { setZoom($0) }),
+                            in: 1...maxZoom
+                        )
+                        .frame(width: 170)
+                        Text(String(format: "%.1fx", zoomValue))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(hintColor)
+                            .frame(width: 38)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .font(.system(size: 12, design: .monospaced))
 
                 chartArea
 
-                // 底部：视口位置滑块（拖动图表同样可以平移）
+                // 底栏：视口位置滑块（拖动图表同样可以平移）
                 HStack(spacing: 10) {
                     Image(systemName: "arrow.left.and.right")
                         .font(.system(size: 12))
@@ -513,45 +528,6 @@ struct LandscapeChartView: View {
                 }
             }
             .padding()
-
-            // 右上角：横向缩放滑块
-            VStack {
-                HStack {
-                    Spacer()
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12))
-                            .foregroundColor(hintColor)
-                        Slider(
-                            value: Binding(get: { zoomValue }, set: { setZoom($0) }),
-                            in: 1...maxZoom
-                        )
-                        .frame(width: 180)
-                        Text(String(format: "%.1fx", zoomValue))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(hintColor)
-                            .frame(width: 40)
-                    }
-                    .padding(10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                }
-                Spacer()
-            }
-            .padding()
-
-            // 左上角：关闭
-            VStack {
-                HStack {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(titleColor)
-                    }
-                    Spacer()
-                }
-                Spacer()
-            }
-            .padding()
         }
         .onAppear { OrientationManager.shared.enterLandscape() }
         .onDisappear { OrientationManager.shared.exitLandscape() }
@@ -566,8 +542,18 @@ struct LandscapeChartView: View {
                 queryIndex: $queryIndex,
                 viewStart: currentStart,
                 viewSpanSeconds: currentSpan,
-                queryEnabled: false
+                queryEnabled: false,
+                topInset: 34
             )
+            // 无查询时在图表顶部居中显示操作提示（与查询胶囊互斥）
+            .overlay(alignment: .top) {
+                if queryIndex == nil {
+                    Text("单击查询 · 拖动平移 · 双指缩放")
+                        .font(.system(size: 12))
+                        .foregroundColor(hintColor)
+                        .padding(.top, 10)
+                }
+            }
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .local)
                     .onChanged { handleDragChanged($0, size: geo.size) }
@@ -607,7 +593,7 @@ struct LandscapeChartView: View {
         }
         guard !magnifying, !dragActive else { return }
         // 未进入平移模式 → 单击查询；点击绘图区外清除
-        let plot = CGRect(x: 40, y: 8, width: max(size.width - 52, 10), height: max(size.height - 30, 10))
+        let plot = CGRect(x: 40, y: 34, width: max(size.width - 52, 10), height: max(size.height - 56, 10))
         guard plot.insetBy(dx: -10, dy: -10).contains(value.location) else {
             queryIndex = nil
             return
@@ -740,7 +726,7 @@ struct RecordingDetailView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { queryIndex = nil }
 
-                    RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor, queryIndex: $queryIndex)
+                    RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor, queryIndex: $queryIndex, topInset: 28)
                         .frame(height: 300)
                         .background(Color(.systemGray6))
                         .cornerRadius(14)
@@ -888,6 +874,8 @@ struct RecordingChartView: View {
     var viewSpanSeconds: TimeInterval? = nil
     /// 内置点击查询手势开关（全屏模式下由外部手势接管）
     var queryEnabled: Bool = true
+    /// 绘图区顶部留白（给查询胶囊/提示文字让位）
+    var topInset: CGFloat = 8
 
     /// 点击绘图区内查询最近采样点；点击绘图区外的留白区域则清除查询
     private func handleTouch(at point: CGPoint, layout: RecordingChartLayout) {
@@ -900,7 +888,7 @@ struct RecordingChartView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let layout = RecordingChartLayout(samples: samples, size: geo.size, viewStart: viewStart, viewSpanSeconds: viewSpanSeconds)
+            let layout = RecordingChartLayout(samples: samples, size: geo.size, viewStart: viewStart, viewSpanSeconds: viewSpanSeconds, topInset: topInset)
             let chart = Canvas { context, size in
                 draw(in: &context, size: size, layout: layout)
             }
@@ -1041,8 +1029,8 @@ private struct RecordingChartLayout {
     let ymin: Double
     let ymax: Double
 
-    init(samples: [HeartRateRecording.Sample], size: CGSize, viewStart: Date? = nil, viewSpanSeconds: TimeInterval? = nil) {
-        plot = CGRect(x: 40, y: 8, width: max(size.width - 52, 10), height: max(size.height - 30, 10))
+    init(samples: [HeartRateRecording.Sample], size: CGSize, viewStart: Date? = nil, viewSpanSeconds: TimeInterval? = nil, topInset: CGFloat = 8) {
+        plot = CGRect(x: 40, y: topInset, width: max(size.width - 52, 10), height: max(size.height - topInset - 22, 10))
         let first = samples.first?.t ?? Date()
         let last = samples.last?.t ?? first
         // 视口：未指定时覆盖全部数据；指定时显示 [start, end] 区间
