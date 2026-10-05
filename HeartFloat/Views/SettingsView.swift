@@ -505,7 +505,7 @@ struct RecordingDetailView: View {
                 .zIndex(10)
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: showExportMenu)
+        .animation(.easeInOut(duration: 0.2), value: showExportMenu)
         .onPreferenceChange(GlobalFrameKey.self) { exportButtonFrame = $0 }
         .navigationTitle("记录详情")
         .navigationBarTitleDisplayMode(.inline)

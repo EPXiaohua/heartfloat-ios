@@ -120,7 +120,7 @@ struct MainView: View {
         .animation(.easeInOut(duration: 0.2), value: viewModel.showConnectionOverlay)
         .animation(.easeInOut(duration: 0.2), value: showStopConfirm)
         .animation(.easeInOut(duration: 0.2), value: showDisconnectConfirm)
-        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: showModeMenu)
+        .animation(.easeInOut(duration: 0.2), value: showModeMenu)
         .animation(.easeInOut(duration: 0.2), value: viewModel.pendingUnsavedRecording != nil)
         .onPreferenceChange(GlobalFrameKey.self) { chipFrame = $0 }
         .sheet(isPresented: $showSettings) {
@@ -797,12 +797,15 @@ struct AnchoredMenuOverlay: View {
     var body: some View {
         GeometryReader { geo in
             let screen = geo.frame(in: .global)
+            // 锚点未获取到时（preference 未传播）回退到曲线卡头部附近的估算位置，避免出现在角落
+            let effectiveAnchor = anchor.width > 1
+                ? anchor
+                : CGRect(x: screen.maxX - 90, y: screen.minY + 230, width: 80, height: 30)
             let menuHeight = Self.estimatedHeight(for: items)
             // 优先在锚点上方弹出，空间不足时移到下方；水平方向右对齐锚点并夹在屏幕内
-            let popsUp = anchor.minY - menuHeight - 12 > screen.minY + 50
-            let menuY = popsUp ? anchor.minY - menuHeight - 8 : anchor.maxY + 8
-            let menuX = min(max(anchor.maxX - menuWidth, screen.minX + 12), screen.maxX - menuWidth - 12)
-            let scaleAnchor: UnitPoint = popsUp ? .bottom : .top
+            let popsUp = effectiveAnchor.minY - menuHeight - 12 > screen.minY + 50
+            let menuY = popsUp ? effectiveAnchor.minY - menuHeight - 8 : effectiveAnchor.maxY + 8
+            let menuX = min(max(effectiveAnchor.maxX - menuWidth, screen.minX + 12), screen.maxX - menuWidth - 12)
 
             Color.clear
                 .contentShape(Rectangle())
@@ -825,9 +828,11 @@ struct AnchoredMenuOverlay: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
                     .shadow(color: .black.opacity(0.16), radius: 20, y: 6)
                     .position(x: menuX + menuWidth / 2, y: menuY + menuHeight / 2)
-                    .transition(.scale(scale: 0.72, anchor: scaleAnchor).combined(with: .opacity))
+                    .transition(.opacity)
                 )
         }
+        // 让 GeometryReader 的坐标系与全局坐标一致，锚点定位才准确
+        .ignoresSafeArea()
     }
 
     private func row(_ item: AnchoredMenuItem) -> some View {
