@@ -21,7 +21,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
         didSet {
             guard oldValue != autoRecording else { return }
             UserDefaults.standard.set(autoRecording, forKey: "recordingAutoMode")
-            // 已连接状态下切到 Auto：立即开始记录，否则点断开时不会走记录保护
+            // 已连接状态下切到 Auto：立即开始记录，到断开时自动保存
             if autoRecording, connectionState == .connected, !isRecording {
                 startRecording()
             }

@@ -182,8 +182,8 @@ struct MainView: View {
             HStack(spacing: 10) {
                 Button(action: {
                     if viewModel.connectionState == .connected {
-                        // 记录进行中先经确认弹窗停止保存，避免误触丢失
-                        if viewModel.isRecording {
+                        // 手动模式记录中弹确认防误触；Auto 模式直接断开，由断连流程自动保存
+                        if viewModel.isRecording && !viewModel.autoRecording {
                             showDisconnectConfirm = true
                         } else {
                             viewModel.disconnect()
