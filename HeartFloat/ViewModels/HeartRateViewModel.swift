@@ -16,6 +16,8 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var recordingStartedAt: Date?
     @Published var recordings: [HeartRateRecording] = []
+    /// 当前连接的设备名
+    @Published var connectedDeviceName: String = ""
     /// 心率采样点（时间戳 + 值）：每次采样无条件追加，曲线按绝对时间轴绘制，
     /// 视口跟随最新点，同值采样表现为水平线平移（形态不变），值变化才出现形态变化
     var heartRateSamples: [(Date, Double)] = []
@@ -113,6 +115,10 @@ class HeartRateViewModel: NSObject, ObservableObject {
         bleService.$isContact
             .receive(on: DispatchQueue.main)
             .assign(to: &$isContact)
+
+        bleService.$connectedDeviceName
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$connectedDeviceName)
 
         bleService.$logMessages
             .receive(on: DispatchQueue.main)

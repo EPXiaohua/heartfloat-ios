@@ -210,7 +210,7 @@ struct MainView: View {
         case .connecting:
             return "正在连接..."
         case .connected:
-            return "已连接"
+            return viewModel.connectedDeviceName.isEmpty ? "已连接" : "已连接 · \(viewModel.connectedDeviceName)"
         case .failed:
             return "连接失败"
         }

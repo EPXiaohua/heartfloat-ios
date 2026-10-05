@@ -9,6 +9,8 @@ class BleService: NSObject, ObservableObject {
     @Published var currentHeartRate: Int = 0
     @Published var isContact: Bool = false
     @Published var logMessages: [String] = []
+    /// 当前连接的设备名（断开后清空）
+    @Published var connectedDeviceName: String = ""
 
     enum ConnectionState {
         case disconnected
@@ -137,6 +139,7 @@ class BleService: NSObject, ObservableObject {
                 centralManager?.cancelPeripheralConnection(peripheral)
             }
             connectedPeripheral = nil
+            connectedDeviceName = ""
             heartRateCharacteristic = nil
             isManualStop = true
             connectionState = .disconnected
@@ -157,6 +160,7 @@ class BleService: NSObject, ObservableObject {
             centralManager?.cancelPeripheralConnection(peripheral)
         }
         connectedPeripheral = nil
+        connectedDeviceName = ""
         heartRateCharacteristic = nil
         connectionState = .disconnected
         addLog("已断开连接")
@@ -263,6 +267,7 @@ extension BleService: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         addLog("GATT连接成功")
         connectionState = .connected
+        connectedDeviceName = peripheral.name ?? "未知设备"
         directConnectTimeout?.cancel()
         directConnectTimeout = nil
         // 记住设备，下次连接直接直连（持久化，重启后依然有效）
@@ -279,6 +284,7 @@ extension BleService: CBCentralManagerDelegate {
         connectionState = .disconnected
         watchdogWork?.cancel()
         connectedPeripheral = nil
+        connectedDeviceName = ""
         heartRateCharacteristic = nil
 
         // 用户主动断开时不自动重连
