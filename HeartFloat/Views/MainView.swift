@@ -774,6 +774,7 @@ struct GlassAlertOverlay: View {
 
 // MARK: - 锚定弹出菜单（contextMenu 形态的自定义实现，支持副标题说明）
 
+/// 锚点 frame 通过 preference 传递（主界面无 ScrollView，传播可靠）
 struct GlobalFrameKey: PreferenceKey {
     static var defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
@@ -789,52 +790,25 @@ struct AnchoredMenuItem: Identifiable {
     var action: () -> Void
 }
 
-struct AnchoredMenuOverlay: View {
-    let anchor: CGRect
+/// 菜单卡片本体（毛玻璃 + 副标题行），被锚定容器的不同定位方式共用
+struct AnchoredMenuCard: View {
     let items: [AnchoredMenuItem]
     var onClose: () -> Void
 
-    private let menuWidth: CGFloat = 250
-
     var body: some View {
-        GeometryReader { geo in
-            let screen = geo.frame(in: .global)
-            // 锚点未获取到时（preference 未传播）回退到曲线卡头部附近的估算位置，避免出现在角落
-            let effectiveAnchor = anchor.width > 1
-                ? anchor
-                : CGRect(x: screen.maxX - 90, y: screen.minY + 230, width: 80, height: 30)
-            let menuHeight = Self.estimatedHeight(for: items)
-            // 优先在锚点上方弹出，空间不足时移到下方；水平方向右对齐锚点并夹在屏幕内
-            let popsUp = effectiveAnchor.minY - menuHeight - 12 > screen.minY + 50
-            let menuY = popsUp ? effectiveAnchor.minY - menuHeight - 8 : effectiveAnchor.maxY + 8
-            let menuX = min(max(effectiveAnchor.maxX - menuWidth, screen.minX + 12), screen.maxX - menuWidth - 12)
-
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { onClose() }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 12).onEnded { _ in onClose() }
-                )
-                .overlay(
-                    VStack(spacing: 2) {
-                        ForEach(items) { item in
-                            row(item)
-                            if item.id != items.last?.id {
-                                Divider()
-                                    .padding(.horizontal, 14)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 6)
-                    .frame(width: menuWidth)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.16), radius: 20, y: 6)
-                    .position(x: menuX + menuWidth / 2, y: menuY + menuHeight / 2)
-                    .transition(.opacity)
-                )
+        VStack(spacing: 2) {
+            ForEach(items) { item in
+                row(item)
+                if item.id != items.last?.id {
+                    Divider()
+                        .padding(.horizontal, 14)
+                }
+            }
         }
-        // 让 GeometryReader 的坐标系与全局坐标一致，锚点定位才准确
-        .ignoresSafeArea()
+        .padding(.vertical, 6)
+        .frame(width: 250)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.16), radius: 20, y: 6)
     }
 
     private func row(_ item: AnchoredMenuItem) -> some View {
@@ -872,6 +846,43 @@ struct AnchoredMenuOverlay: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct AnchoredMenuOverlay: View {
+    let anchor: CGRect
+    let items: [AnchoredMenuItem]
+    var onClose: () -> Void
+
+    private let menuWidth: CGFloat = 250
+
+    var body: some View {
+        GeometryReader { geo in
+            let screen = geo.frame(in: .global)
+            // 锚点未获取到时（preference 未传播）回退到曲线卡头部附近的估算位置，避免出现在角落
+            let effectiveAnchor = anchor.width > 1
+                ? anchor
+                : CGRect(x: screen.maxX - 90, y: screen.minY + 230, width: 80, height: 30)
+            let menuHeight = Self.estimatedHeight(for: items)
+            // 优先在锚点上方弹出，空间不足时移到下方；水平方向右对齐锚点并夹在屏幕内
+            let popsUp = effectiveAnchor.minY - menuHeight - 12 > screen.minY + 50
+            let menuY = popsUp ? effectiveAnchor.minY - menuHeight - 8 : effectiveAnchor.maxY + 8
+            let menuX = min(max(effectiveAnchor.maxX - menuWidth, screen.minX + 12), screen.maxX - menuWidth - 12)
+
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { onClose() }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 12).onEnded { _ in onClose() }
+                )
+                .overlay(
+                    AnchoredMenuCard(items: items, onClose: onClose)
+                        .position(x: menuX + menuWidth / 2, y: menuY + menuHeight / 2)
+                        .transition(.opacity)
+                )
+        }
+        // 让 GeometryReader 的坐标系与全局坐标一致，锚点定位才准确
+        .ignoresSafeArea()
     }
 
     /// 估算菜单高度用于锚定定位（卡片实际高度由内容自然撑开）

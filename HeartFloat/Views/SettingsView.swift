@@ -462,7 +462,6 @@ struct RecordingDetailView: View {
 
     @State private var shareItem: ShareItem?
     @State private var showExportMenu = false
-    @State private var exportButtonFrame: CGRect = .zero
 
     struct ShareItem: Identifiable {
         let id = UUID()
@@ -484,32 +483,14 @@ struct RecordingDetailView: View {
                 }
                 .padding()
             }
-
-            // 导出格式选择（锚定在导出按钮旁弹出）
-            if showExportMenu {
-                AnchoredMenuOverlay(anchor: exportButtonFrame, items: [
-                    AnchoredMenuItem(
-                        title: "导出 CSV",
-                        subtitle: "表格软件可直接打开",
-                        icon: "tablecells"
-                    ) {
-                        exportFile(ext: "csv", text: csvText)
-                    },
-                    AnchoredMenuItem(
-                        title: "导出 JSON",
-                        subtitle: "完整原始数据，便于程序处理",
-                        icon: "curlybraces.square"
-                    ) {
-                        exportFile(ext: "json", text: jsonText)
-                    }
-                ]) {
-                    showExportMenu = false
-                }
-                .zIndex(10)
-            }
         }
+        // 菜单打开时点击页面任意处关闭（simultaneous 不影响子按钮正常点击）
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                if showExportMenu { showExportMenu = false }
+            }
+        )
         .animation(.easeInOut(duration: 0.2), value: showExportMenu)
-        .onPreferenceChange(GlobalFrameKey.self) { exportButtonFrame = $0 }
         .navigationTitle("记录详情")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $shareItem) { item in
@@ -560,11 +541,31 @@ struct RecordingDetailView: View {
             .foregroundColor(.white)
             .cornerRadius(14)
         }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(key: GlobalFrameKey.self, value: geo.frame(in: .global))
+        // 菜单卡片从按钮上方向上弹出；按钮位于页面底部，向上弹不会被滚动区域裁剪
+        .overlay(alignment: .top) {
+            if showExportMenu {
+                AnchoredMenuCard(items: [
+                    AnchoredMenuItem(
+                        title: "导出 CSV",
+                        subtitle: "表格软件可直接打开",
+                        icon: "tablecells"
+                    ) {
+                        exportFile(ext: "csv", text: csvText)
+                    },
+                    AnchoredMenuItem(
+                        title: "导出 JSON",
+                        subtitle: "完整原始数据，便于程序处理",
+                        icon: "curlybraces.square"
+                    ) {
+                        exportFile(ext: "json", text: jsonText)
+                    }
+                ]) {
+                    showExportMenu = false
+                }
+                .offset(y: -136)
+                .transition(.opacity)
             }
-        )
+        }
     }
 
     private var csvText: String {
