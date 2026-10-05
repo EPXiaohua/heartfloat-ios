@@ -1023,12 +1023,14 @@ private struct RecordingChartLayout {
         plot = CGRect(x: 40, y: 8, width: max(size.width - 52, 10), height: max(size.height - 30, 10))
         let first = samples.first?.t ?? Date()
         let last = samples.last?.t ?? first
-        // 视口：未指定时覆盖全部数据；指定时显示 [start, start+span] 区间
+        // 视口：未指定时覆盖全部数据；指定时显示 [start, end] 区间
         let start = viewStart ?? first
         let span = viewSpanSeconds ?? max(last.timeIntervalSince(first), 10)
+        let end = start.addingTimeInterval(span)
+        // 用局部变量过滤：init 完成前闭包不能捕获 self 的属性
+        let inView = samples.filter { $0.t >= start && $0.t <= end }
         xmin = start
-        xmax = start.addingTimeInterval(span)
-        let inView = samples.filter { $0.t >= xmin && $0.t <= xmax }
+        xmax = end
         let values = (inView.isEmpty ? samples : inView).map { Double($0.bpm) }
         let vmin = values.min() ?? 60
         let vmax = values.max() ?? 100
