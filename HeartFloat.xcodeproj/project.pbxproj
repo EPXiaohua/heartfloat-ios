@@ -1,4 +1,4 @@
-﻿// !$*UTF8*$!
+// !$*UTF8*$!
 {
 	archiveVersion = 56;
 	classes = {
@@ -115,11 +115,12 @@
 			};
 			buildConfigurationList = 2A6E5EE42C4F5E5D00A1F7FF /* Build configuration list for PBXProject "HeartFloat" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
+			developmentRegion = "zh_CN";
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
+				"zh_CN",
 			);
 			mainGroup = 2A6E5ED12C4F5E5D00A1F7FF;
 			productRefGroup = 2A6E5ED32C4F5E5D00A1F7FF /* Products */;

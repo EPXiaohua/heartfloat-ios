@@ -1,6 +1,7 @@
 name: HeartFloat
 options:
   bundleIdPrefix: com.heartfloat
+  developmentLanguage: zh_CN
   deploymentTarget:
     iOS: "15.0"
   xcodeVersion: "15.0"

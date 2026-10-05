@@ -4,7 +4,9 @@ struct MainView: View {
     @EnvironmentObject var viewModel: HeartRateViewModel
     @EnvironmentObject var settings: SettingsManager
 
-    private let themeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
+    @State private var showSettings = false
+
+    private let themeColor = Color(hex: "EC746F")
 
     var body: some View {
         ZStack {
@@ -15,19 +17,16 @@ struct MainView: View {
             )
             .ignoresSafeArea()
 
-            NavigationView {
-                VStack(spacing: 14) {
-                    titleSection
-                    heartRateDisplay
-                    statusSection
-                    chartCard
-                    buttonSection
-                    Spacer()
-                    hintSection
-                }
-                .padding()
-                .navigationBarHidden(true)
+            VStack(spacing: 14) {
+                titleSection
+                heartRateDisplay
+                statusSection
+                chartCard
+                buttonSection
+                Spacer()
+                hintSection
             }
+            .padding()
 
             if viewModel.showConnectionOverlay {
                 ConnectionOverlayView(viewModel: viewModel)
@@ -36,12 +35,29 @@ struct MainView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.showConnectionOverlay)
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
     }
 
     private var titleSection: some View {
-        Text("心率悬浮窗")
-            .font(.system(size: 24, weight: .bold, design: .rounded))
-            .foregroundColor(themeColor)
+        HStack {
+            Text("心率悬浮窗")
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundColor(themeColor)
+
+            Spacer()
+
+            // 设置入口：右上角齿轮，点按底部弹出设置面板
+            Button(action: { showSettings = true }) {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(themeColor)
+                    .frame(width: 38, height: 38)
+                    .background(themeColor.opacity(0.12))
+                    .clipShape(Circle())
+            }
+        }
     }
 
     private var heartRateDisplay: some View {
@@ -140,25 +156,6 @@ struct MainView: View {
                 }
                 .disabled(viewModel.connectionState != .connected)
                 .opacity(viewModel.connectionState == .connected ? 1 : 0.55)
-            }
-
-            NavigationLink(destination: SettingsView()) {
-                HStack {
-                    Image(systemName: "gearshape.fill")
-                    Text("设置")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 0.64, green: 0.38, blue: 0.75), Color(red: 0.55, green: 0.32, blue: 0.68)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                )
-                .foregroundColor(.white)
-                .cornerRadius(14)
-                .shadow(color: Color(red: 0.61, green: 0.35, blue: 0.71).opacity(0.3), radius: 8, y: 3)
             }
         }
         .padding(.top, 2)

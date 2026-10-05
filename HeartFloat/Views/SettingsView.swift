@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsManager
     @EnvironmentObject var viewModel: HeartRateViewModel
+    @Environment(\.dismiss) private var dismiss
 
     @State private var showingColorPicker = false
     @State private var colorPickerTarget: ColorPickerTarget = .bpmNumber
@@ -11,32 +12,42 @@ struct SettingsView: View {
     @State private var showingHttpAlert = false
     @State private var httpAlertMessage = ""
 
+    private let themeColor = Color(hex: "EC746F")
+
     enum ColorPickerTarget {
         case bpmNumber
         case bpmLabel
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                previewSection
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 24) {
+                    previewSection
 
-                bpmNumberSettings
+                    bpmNumberSettings
 
-                bpmLabelSettings
+                    bpmLabelSettings
 
-                positionSettings
+                    positionSettings
 
-                backgroundSettings
+                    backgroundSettings
 
-                httpPushSettings
+                    httpPushSettings
 
-                presetSection
+                    presetSection
+                }
+                .padding()
             }
-            .padding()
+            .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
         }
-        .navigationTitle("设置")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationViewStyle(.stack)
         .sheet(isPresented: $showingColorPicker) {
             ColorPickerSheet(
                 selectedColor: colorPickerTarget == .bpmNumber ? settings.bpmNumberColor : settings.bpmLabelColor,
@@ -238,7 +249,7 @@ struct SettingsView: View {
                             showingHttpAlert = true
                         }
                     }
-                    .foregroundColor(.blue)
+                    .foregroundColor(themeColor)
                 }
 
                 if let ip = HttpServerManager.shared.localIP {
@@ -257,7 +268,7 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                     Text("/heartbeat - 返回纯文本心率值\n/heartbeat.json - 返回JSON格式数据\n/live - 直播专用页面")
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.blue)
+                        .foregroundColor(themeColor)
                 }
             }
         }
@@ -346,10 +357,8 @@ struct ColorPickerSheet: View {
 
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
-        NavigationView {
-            SettingsView()
-                .environmentObject(SettingsManager.shared)
-                .environmentObject(HeartRateViewModel())
-        }
+        SettingsView()
+            .environmentObject(SettingsManager.shared)
+            .environmentObject(HeartRateViewModel())
     }
 }

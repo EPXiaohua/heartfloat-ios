@@ -10,6 +10,7 @@ struct HeartFloatApp: App {
             MainView()
                 .environmentObject(viewModel)
                 .environmentObject(settingsManager)
+                .tint(Color(hex: "EC746F"))
         }
     }
 }
