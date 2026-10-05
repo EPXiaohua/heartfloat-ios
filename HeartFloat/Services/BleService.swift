@@ -46,6 +46,9 @@ class BleService: NSObject, ObservableObject {
     }
 
     func startScan() {
+        // 每次发起连接只展示本次日志
+        logMessages.removeAll()
+
         guard let central = centralManager, central.state == .poweredOn else {
             addLog("蓝牙未开启或不可用")
             connectionState = .failed
