@@ -393,7 +393,7 @@ extension BleService: CBPeripheralDelegate {
 
         guard characteristic.uuid == heartRateMeasurementUUID, characteristic.isNotifying else { return }
         // 心率通知就绪才算真正连接成功
-        addLog("心率通知已就绪，连接成功 ✅")
+        addLog("心率通知已就绪，连接成功 ✓")
         gattTimeoutWork?.cancel()
         connectionState = .connected
         connectedDeviceName = connectedPeripheral?.name ?? "未知设备"

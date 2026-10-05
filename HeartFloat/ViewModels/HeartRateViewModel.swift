@@ -339,7 +339,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
             overlay.trailingAnchor.constraint(equalTo: target.trailingAnchor)
         ])
         pipOverlay = overlay
-        addLog("悬浮窗 UI 已叠加到画中画窗口 ✅")
+        addLog("悬浮窗 UI 已叠加到画中画窗口 ✓")
     }
 
     private func removeOverlay() {
@@ -380,7 +380,7 @@ extension HeartRateViewModel: AVPictureInPictureControllerDelegate {
         // 记录主 window（启动 PiP 前的 keyWindow），用于区分新的 PiP window
         let mainWindow = pipCarrierView?.window
         isPipActive = true
-        addLog("画中画已启动 ✅")
+        addLog("画中画已启动 ✓")
         attachOverlayToPipWindow(mainWindow: mainWindow)
     }
 
