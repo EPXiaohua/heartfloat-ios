@@ -1001,7 +1001,7 @@ struct StorageManageView: View {
             forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey]
         ) {
             availableCapacity = values.volumeAvailableCapacityForImportantUsage ?? 0
-            totalCapacity = values.volumeTotalCapacity ?? 0
+            totalCapacity = Int64(values.volumeTotalCapacity ?? 0)
         }
     }
 
