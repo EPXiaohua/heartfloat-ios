@@ -783,6 +783,7 @@ struct AnchoredMenuItem: Identifiable {
     var subtitle: String? = nil
     var icon: String? = nil
     var isSelected = false
+    var isDestructive = false
     var action: () -> Void
 }
 
