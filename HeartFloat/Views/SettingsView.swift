@@ -1033,7 +1033,14 @@ struct StorageManageView: View {
     @State private var availableCapacity: Int64 = 0
     @State private var totalCapacity: Int64 = 0
     @State private var showCleanConfirm = false
+    @State private var showNoCacheTip = false
     @State private var isCleaning = false
+
+    /// 应用占用（心率记录 + 临时缓存）占手机总容量的比例
+    private var usageRatio: Double {
+        guard totalCapacity > 0 else { return 0 }
+        return min(1, Double(recordingsSize + cacheSize) / Double(totalCapacity))
+    }
 
     var body: some View {
         ZStack {
@@ -1041,21 +1048,40 @@ struct StorageManageView: View {
                 Section("手机空间") {
                     storageRow(icon: "iphone", label: "可用空间", value: CacheCleaner.sizeText(availableCapacity))
                     storageRow(icon: "internaldrive", label: "总容量", value: CacheCleaner.sizeText(totalCapacity))
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("应用占用对比")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Text("\(CacheCleaner.sizeText(recordingsSize + cacheSize)) / \(CacheCleaner.sizeText(totalCapacity))")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        ProgressView(value: usageRatio)
+                            .progressViewStyle(.linear)
+                            .tint(Color(hex: "EC746F"))
+                    }
+                    .padding(.vertical, 4)
                 }
 
                 Section {
-                    NavigationLink(destination: RecordingsListView()) {
-                        storageRow(icon: "waveform.path.ecg", label: "心率记录", value: CacheCleaner.sizeText(recordingsSize))
-                    }
+                    storageRow(icon: "waveform.path.ecg", label: "心率记录", value: CacheCleaner.sizeText(recordingsSize))
                     storageRow(icon: "doc.on.doc", label: "临时缓存", value: CacheCleaner.sizeText(cacheSize))
                 } header: {
                     Text("应用占用")
                 } footer: {
-                    Text("临时缓存包含画中画载体视频、导出临时文件等可再生数据，清理后不影响心率记录。")
+                    Text("临时缓存包含画中画载体视频、导出临时文件等可再生数据，清理后不影响心率记录。心率记录可在设置一级页面查看与管理。")
                 }
 
                 Section {
-                    Button(action: { showCleanConfirm = true }) {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        if cacheSize > 0 {
+                            showCleanConfirm = true
+                        } else {
+                            showNoCacheTip = true
+                        }
+                    }) {
                         HStack {
                             Spacer()
                             if isCleaning {
@@ -1071,7 +1097,7 @@ struct StorageManageView: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(.red)
                     }
-                    .disabled(isCleaning || cacheSize == 0)
+                    .disabled(isCleaning)
                 }
             }
             .listStyle(.insetGrouped)
@@ -1084,8 +1110,23 @@ struct StorageManageView: View {
                 .transition(.opacity)
                 .zIndex(10)
             }
+
+            if showNoCacheTip {
+                GlassAlertOverlay(
+                    iconName: "sparkles",
+                    iconColor: .green,
+                    title: "很干净",
+                    message: "当前没有可清理的临时缓存",
+                    confirmTitle: "知道",
+                    cancelTitle: nil,
+                    onConfirm: { showNoCacheTip = false }
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: showCleanConfirm)
+        .animation(.easeInOut(duration: 0.2), value: showNoCacheTip)
         .navigationTitle("存储管理")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: refresh)

@@ -710,9 +710,9 @@ struct GlassAlertOverlay: View {
     var message: String
     var confirmTitle: String
     var confirmDestructive = false
-    var cancelTitle = "取消"
+    var cancelTitle: String? = "取消"
     var onConfirm: () -> Void
-    var onCancel: () -> Void
+    var onCancel: (() -> Void)? = nil
 
     var body: some View {
         ZStack {
@@ -747,17 +747,19 @@ struct GlassAlertOverlay: View {
                             .foregroundColor(.white)
                             .cornerRadius(12)
                     }
-                    Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        onCancel()
-                    }) {
-                        Text(cancelTitle)
-                            .font(.system(size: 15, weight: .medium))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color(.systemGray5))
-                            .foregroundColor(.primary)
-                            .cornerRadius(12)
+                    if let cancelTitle = cancelTitle {
+                        Button(action: {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            onCancel?()
+                        }) {
+                            Text(cancelTitle)
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color(.systemGray5))
+                                .foregroundColor(.primary)
+                                .cornerRadius(12)
+                        }
                     }
                 }
                 .padding(.top, 4)
