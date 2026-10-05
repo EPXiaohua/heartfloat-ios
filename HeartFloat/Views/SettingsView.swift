@@ -923,11 +923,13 @@ struct StorageManageView: View {
                     storageRow(icon: "internaldrive", label: "总容量", value: CacheCleaner.sizeText(totalCapacity))
                 }
 
-                Section("应用占用") {
+                Section {
                     NavigationLink(destination: RecordingsListView()) {
                         storageRow(icon: "waveform.path.ecg", label: "心率记录", value: CacheCleaner.sizeText(recordingsSize))
                     }
                     storageRow(icon: "doc.on.doc", label: "临时缓存", value: CacheCleaner.sizeText(cacheSize))
+                } header: {
+                    Text("应用占用")
                 } footer: {
                     Text("临时缓存包含画中画载体视频、导出临时文件等可再生数据，清理后不影响心率记录。")
                 }
