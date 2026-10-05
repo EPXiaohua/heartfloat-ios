@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>心率悬浮窗 - 服务</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "PingFang SC", sans-serif;
+    background: linear-gradient(180deg, #FFF5F5 0%, #FAFAFA 100%);
+    min-height: 100vh;
+    display: flex; justify-content: center; align-items: center;
+    padding: 24px;
+  }
+  .wrap { width: 100%; max-width: 420px; }
+  .card {
+    background: rgba(255, 255, 255, .92);
+    border-radius: 20px;
+    padding: 28px 24px;
+    box-shadow: 0 10px 30px rgba(236, 116, 111, .12);
+    text-align: center;
+  }
+  .card + .card { margin-top: 16px; }
+  .heart { width: 44px; height: 44px; display: inline-block; animation: beat 1s ease-in-out infinite; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 25% { transform: scale(1.15); } }
+  .bpm {
+    font-size: 88px; font-weight: 800;
+    font-family: -apple-system-rounded, -apple-system, sans-serif;
+    color: #FF6B6B; line-height: 1; margin: 14px 0 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .unit { font-size: 15px; font-weight: 600; color: rgba(255, 107, 107, .65); letter-spacing: 2px; }
+  .status {
+    display: inline-flex; align-items: center; gap: 7px;
+    margin-top: 16px; padding: 7px 14px; border-radius: 999px;
+    background: #F2F2F7; color: #8E8E93; font-size: 13px; font-weight: 500;
+  }
+  .status.on { background: #E8F8EE; color: #34A853; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .sec-title { text-align: left; font-size: 13px; font-weight: 600; color: #8E8E93; margin: 0 2px 10px; }
+  .api {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 12px; background: #F7F7F9;
+    text-decoration: none; margin-bottom: 8px;
+  }
+  .api:last-child { margin-bottom: 0; }
+  .api:active { background: #EFEFF3; }
+  .get {
+    font-size: 10px; font-weight: 700; color: #fff;
+    background: #EC746F; border-radius: 5px; padding: 3px 7px; letter-spacing: .5px;
+    flex-shrink: 0;
+  }
+  .col { flex: 1; min-width: 0; }
+  .path { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #1C1C1E; font-weight: 600; }
+  .desc { font-size: 11px; color: #8E8E93; margin-top: 2px; }
+  .arrow { margin-left: auto; color: #C7C7CC; font-size: 18px; line-height: 1; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <svg class="heart" id="heart" viewBox="0 0 24 24"><path d="M12 21.35C7.2 17.6 4 14.2 4 10.5 4 7.9 6.1 5.8 8.7 5.8c1.3 0 2.5.6 3.3 1.6.8-1 2-1.6 3.3-1.6 2.6 0 4.7 2.1 4.7 4.7 0 3.7-3.2 7.1-8 10.85z" fill="#FF6B6B"/></svg>
+    <div class="bpm" id="bpm">--</div>
+    <div class="unit">BPM</div>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">等待数据</span></div>
+  </div>
+  <div class="card" style="text-align: left; padding: 20px;">
+    <div class="sec-title">API 接口（点击打开）</div>
+    <a class="api" href="/heartbeat">
+      <span class="get">GET</span>
+      <span class="col"><span class="path">/heartbeat</span><div class="desc">返回纯文本心率值</div></span>
+      <span class="arrow">›</span>
+    </a>
+    <a class="api" href="/heartbeat.json">
+      <span class="get">GET</span>
+      <span class="col"><span class="path">/heartbeat.json</span><div class="desc">返回 JSON 格式数据</div></span>
+      <span class="arrow">›</span>
+    </a>
+    <a class="api" href="/live" style="background: #FFF1F0;">
+      <span class="get" style="background: #FF6B6B;">GET</span>
+      <span class="col"><span class="path">/live</span><div class="desc">直播悬浮页（可作 OBS 浏览器源）</div></span>
+      <span class="arrow">›</span>
+    </a>
+  </div>
+</div>
+<script>
+  function refresh() {
+    fetch('/heartbeat.json').then(function (r) { return r.json(); }).then(function (d) {
+      var bpm = d.bpm > 0 ? d.bpm : null;
+      document.getElementById('bpm').textContent = bpm || '--';
+      document.getElementById('statusText').textContent = bpm ? '已连接' : '等待数据';
+      document.getElementById('status').classList.toggle('on', !!bpm);
+      document.getElementById('heart').style.animationDuration = bpm ? (60 / bpm) + 's' : '1s';
+    }).catch(function () {});
+  }
+  refresh();
+  setInterval(refresh, 500);
+</script>
+</body>
+</html>

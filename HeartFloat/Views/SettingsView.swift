@@ -350,24 +350,52 @@ struct HttpPushSettingsView: View {
                         Text("本机地址")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
-                        Text("http://\(ip):\(settings.httpPushPort)")
-                            .font(.system(size: 14, design: .monospaced))
+                        Link(destination: URL(string: "http://\(ip):\(settings.httpPushPort)/")!) {
+                            HStack(spacing: 4) {
+                                Text("http://\(ip):\(settings.httpPushPort)")
+                                    .font(.system(size: 14, design: .monospaced))
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.system(size: 11))
+                            }
+                            .foregroundColor(themeColor)
+                        }
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("API接口说明")
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("API 接口（点击可直接打开）")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
-                    Text("/heartbeat - 返回纯文本心率值\n/heartbeat.json - 返回JSON格式数据\n/live - 直播专用页面")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(themeColor)
+                    apiLink("/heartbeat", "返回纯文本心率值", ip: HttpServerManager.shared.localIP, port: settings.httpPushPort)
+                    apiLink("/heartbeat.json", "返回 JSON 格式数据", ip: HttpServerManager.shared.localIP, port: settings.httpPushPort)
+                    apiLink("/live", "直播悬浮页（可作 OBS 浏览器源）", ip: HttpServerManager.shared.localIP, port: settings.httpPushPort)
                 }
             }
         }
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+    }
+
+    /// API 接口行：设备已获取到本机 IP 时渲染为可点击链接，直接在浏览器打开
+    @ViewBuilder
+    private func apiLink(_ path: String, _ desc: String, ip: String?, port: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let ip = ip, let url = URL(string: "http://\(ip):\(port)\(path)") {
+                Link(destination: url) {
+                    Text(path)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(themeColor)
+                }
+            } else {
+                Text(path)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(themeColor.opacity(0.5))
+            }
+            Text(desc)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
     }
 }
 

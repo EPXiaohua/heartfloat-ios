@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>心率直播</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    min-height: 100vh;
+    font-family: -apple-system, "SF Pro Rounded", "PingFang SC", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pill {
+    display: flex; align-items: center; gap: 14px;
+    padding: 18px 28px;
+    background: rgba(0, 0, 0, .55);
+    border-radius: 999px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .heart {
+    width: 38px; height: 38px;
+    animation: beat 1s ease-in-out infinite;
+    filter: drop-shadow(0 0 8px rgba(255, 107, 107, .7));
+  }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 25% { transform: scale(1.18); } }
+  .bpm {
+    font-size: 64px; font-weight: 800;
+    font-family: -apple-system-rounded, -apple-system, sans-serif;
+    color: #FF6B6B; line-height: 1; min-width: 96px; text-align: center;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 16px rgba(255, 107, 107, .45);
+  }
+  .unit { font-size: 20px; font-weight: 600; color: rgba(255, 255, 255, .92); }
+</style>
+</head>
+<body>
+  <div class="pill">
+    <svg class="heart" id="heart" viewBox="0 0 24 24"><path d="M12 21.35C7.2 17.6 4 14.2 4 10.5 4 7.9 6.1 5.8 8.7 5.8c1.3 0 2.5.6 3.3 1.6.8-1 2-1.6 3.3-1.6 2.6 0 4.7 2.1 4.7 4.7 0 3.7-3.2 7.1-8 10.85z" fill="#FF6B6B"/></svg>
+    <span class="bpm" id="bpm">--</span>
+    <span class="unit">BPM</span>
+  </div>
+<script>
+  function refresh() {
+    fetch('/heartbeat.json').then(function (r) { return r.json(); }).then(function (d) {
+      var bpm = d.bpm > 0 ? d.bpm : null;
+      document.getElementById('bpm').textContent = bpm || '--';
+      document.getElementById('heart').style.animationDuration = bpm ? (60 / bpm) + 's' : '1s';
+    }).catch(function () {});
+  }
+  refresh();
+  setInterval(refresh, 500);
+</script>
+</body>
+</html>
