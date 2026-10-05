@@ -21,7 +21,10 @@ class BleService: NSObject, ObservableObject {
     private var connectedPeripheral: CBPeripheral?
     private var heartRateCharacteristic: CBCharacteristic?
     private var scanTimeoutWork: DispatchWorkItem?
+    private var directConnectTimeout: DispatchWorkItem?
     private var isManualStop = false
+    /// 上次成功连接的设备（直连不依赖广播，避免断开后设备恢复广播慢导致扫不到）
+    private var lastConnectedIdentifier: UUID?
 
     private let heartRateServiceUUID = CBUUID(string: "180D")
     private let heartRateMeasurementUUID = CBUUID(string: "2A37")
@@ -42,6 +45,9 @@ class BleService: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        if let saved = UserDefaults.standard.string(forKey: "lastConnectedBLEPeripheral") {
+            lastConnectedIdentifier = UUID(uuidString: saved)
+        }
         centralManager = CBCentralManager(delegate: self, queue: nil)
     }
 
@@ -56,6 +62,36 @@ class BleService: NSObject, ObservableObject {
         }
 
         discoveredDevices.removeAll()
+
+        // 优先直连上次成功连接的设备：设备断开后恢复广播可能很慢，
+        // 靠扫描等广播包可能一直收不到；直连不依赖广播，只要设备在范围内即可建立链路
+        if let identifier = lastConnectedIdentifier,
+           let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first {
+            connectionState = .connecting
+            addLog("正在直连上次设备...")
+            connectedPeripheral = peripheral
+            peripheral.delegate = self
+            central.connect(peripheral, options: nil)
+
+            directConnectTimeout?.cancel()
+            let timeout = DispatchWorkItem { [weak self] in
+                guard let self = self, self.connectionState == .connecting else { return }
+                self.addLog("直连未响应，改为扫描附近设备...")
+                // 取消挂起的直连尝试并放弃引用（didFailToConnect 回调到达时按已放弃处理）
+                self.connectedPeripheral = nil
+                self.centralManager?.cancelPeripheralConnection(peripheral)
+                self.beginScan()
+            }
+            directConnectTimeout = timeout
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timeout)
+            return
+        }
+
+        beginScan()
+    }
+
+    private func beginScan() {
+        guard let central = centralManager else { return }
         connectionState = .connecting
         addLog("开始扫描BLE设备...")
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
@@ -74,6 +110,7 @@ class BleService: NSObject, ObservableObject {
     /// 取消连接流程（扫描中或连接中），不产生自动重连
     func cancelScan() {
         scanTimeoutWork?.cancel()
+        directConnectTimeout?.cancel()
         centralManager?.stopScan()
         if connectionState != .connected {
             if let peripheral = connectedPeripheral {
@@ -206,6 +243,11 @@ extension BleService: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         addLog("GATT连接成功")
         connectionState = .connected
+        directConnectTimeout?.cancel()
+        directConnectTimeout = nil
+        // 记住设备，下次连接直接直连（持久化，重启后依然有效）
+        lastConnectedIdentifier = peripheral.identifier
+        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "lastConnectedBLEPeripheral")
         peripheral.discoverServices([heartRateServiceUUID])
     }
 
@@ -230,6 +272,8 @@ extension BleService: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        // 直连超时后已主动放弃并转为扫描，晚到的失败回调按已放弃处理
+        guard connectedPeripheral?.identifier == peripheral.identifier else { return }
         addLog("连接失败: \(error?.localizedDescription ?? "未知错误")")
         connectionState = .failed
     }
