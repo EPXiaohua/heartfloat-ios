@@ -745,49 +745,75 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
 struct AboutView: View {
     private let repoURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios")!
 
+    @State private var showCacheCleanup = false
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                VStack(spacing: 6) {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 52))
-                        .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
-                        .padding(.bottom, 2)
-                    Text("心率悬浮窗")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                    Text("版本 \(Self.appVersion)")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.top, 20)
+        ZStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    VStack(spacing: 6) {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 52))
+                            .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
+                            .padding(.bottom, 2)
+                        Text("心率悬浮窗")
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                        Text("版本 \(Self.appVersion)")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 20)
 
-                infoCard(title: "应用简介") {
-                    Text("通过蓝牙连接小米手环等标准心率设备，实时查看心率数值与曲线，支持画中画悬浮窗常亮展示、长时间心率记录与多格式数据导出。")
-                        .font(.system(size: 14))
-                        .foregroundColor(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    infoCard(title: "应用简介") {
+                        Text("通过蓝牙连接小米手环等标准心率设备，实时查看心率数值与曲线，支持画中画悬浮窗常亮展示、长时间心率记录与多格式数据导出。")
+                            .font(.system(size: 14))
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                infoCard(title: "项目信息") {
-                    VStack(spacing: 10) {
-                        HStack {
-                            Text("当前版本")
-                            Spacer()
-                            Text(Self.appVersion)
-                                .foregroundColor(.secondary)
+                    infoCard(title: "项目信息") {
+                        VStack(spacing: 10) {
+                            HStack {
+                                Text("当前版本")
+                                Spacer()
+                                Text(Self.appVersion)
+                                    .foregroundColor(.secondary)
+                            }
+                            Divider()
+                            HStack {
+                                Text("仓库地址")
+                                Spacer()
+                                Link("EPXiaohua/heartfloat-ios", destination: repoURL)
+                            }
                         }
-                        Divider()
-                        HStack {
-                            Text("仓库地址")
-                            Spacer()
-                            Link("EPXiaohua/heartfloat-ios", destination: repoURL)
+                        .font(.system(size: 14))
+                    }
+
+                    infoCard(title: "存储") {
+                        Button(action: { showCacheCleanup = true }) {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("清理缓存")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(Color(.tertiaryLabel))
+                            }
+                            .font(.system(size: 14))
+                            .foregroundColor(.primary)
                         }
                     }
-                    .font(.system(size: 14))
                 }
+                .padding()
             }
-            .padding()
+
+            if showCacheCleanup {
+                CacheCleanupOverlayView(onClose: { showCacheCleanup = false })
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: showCacheCleanup)
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -839,6 +865,160 @@ struct ColorPickerSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 清理缓存弹窗（自定义毛玻璃）
+
+struct CacheCleanupOverlayView: View {
+    var onClose: () -> Void
+
+    private enum Phase { case calculating, ready, cleaning, done }
+
+    @State private var phase: Phase = .calculating
+    @State private var cacheBytes: Int64 = 0
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { } // 阻断点击穿透
+
+            VStack(spacing: 14) {
+                statusIcon
+
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.center)
+
+                if phase == .ready {
+                    Text("画中画载体视频缓存、导出临时文件等可再生数据")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                if phase == .ready {
+                    HStack(spacing: 10) {
+                        Button(action: clean) {
+                            Text("清理")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color(red: 1.0, green: 0.42, blue: 0.42))
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                        }
+                        Button(action: onClose) {
+                            Text("取消")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color(.systemGray5))
+                                .foregroundColor(.primary)
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+            .padding(22)
+            .frame(width: 310)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+        }
+        .onAppear(perform: calculate)
+    }
+
+    private var title: String {
+        switch phase {
+        case .calculating: return "正在计算缓存..."
+        case .ready: return "可清理缓存 \(CacheCleaner.sizeText(cacheBytes))"
+        case .cleaning: return "正在清理..."
+        case .done: return "已清理"
+        }
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch phase {
+        case .calculating, .cleaning:
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 4)
+                    .frame(width: 54, height: 54)
+                ProgressView()
+                    .scaleEffect(1.3)
+            }
+        case .ready:
+            Image(systemName: "trash.circle.fill")
+                .font(.system(size: 54))
+                .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 54))
+                .foregroundColor(.green)
+                .transition(.scale.combined(with: .opacity))
+        }
+    }
+
+    private func calculate() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let bytes = CacheCleaner.calculateCacheSize()
+            DispatchQueue.main.async {
+                cacheBytes = bytes
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    phase = .ready
+                }
+            }
+        }
+    }
+
+    private func clean() {
+        withAnimation(.easeInOut(duration: 0.2)) { phase = .cleaning }
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.3) {
+            CacheCleaner.clearCache()
+            DispatchQueue.main.async {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                    phase = .done
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: onClose)
+            }
+        }
+    }
+}
+
+// MARK: - 缓存计算与清理（临时目录均为可再生数据：载体视频、导出的临时文件等）
+
+private enum CacheCleaner {
+    static func calculateCacheSize() -> Int64 {
+        directorySize(FileManager.default.temporaryDirectory)
+    }
+
+    static func clearCache() {
+        let tmp = FileManager.default.temporaryDirectory
+        let contents = (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
+        for url in contents {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    static func sizeText(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private static func directorySize(_ url: URL) -> Int64 {
+        let contents = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey])) ?? []
+        var total: Int64 = 0
+        for item in contents {
+            guard let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey]) else { continue }
+            if values.isDirectory == true {
+                total += directorySize(item)
+            } else {
+                total += Int64(values.fileSize ?? 0)
+            }
+        }
+        return total
     }
 }
 
