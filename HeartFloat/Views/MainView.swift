@@ -618,7 +618,10 @@ struct ConnectionOverlayView: View {
 
                 logList
 
-                cancelButton
+                // 连接成功后按钮没有意义（弹窗随即自动关闭），直接隐藏
+                if !isConnected {
+                    cancelButton
+                }
             }
             .padding(22)
             .frame(width: 310)
@@ -627,6 +630,7 @@ struct ConnectionOverlayView: View {
             // 开场：淡入 + spring 展开（与其他弹窗一致）
             .scaleEffect(appeared ? 1 : 0.85)
             .opacity(appeared ? 1 : 0)
+            .animation(.easeInOut(duration: 0.25), value: isConnected)
         }
         .onAppear {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
