@@ -96,7 +96,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: build/HeartFloat-${{ github.ref_name }}.ipa
-          generate_release_notes: true
+          overwrite_files: true
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
