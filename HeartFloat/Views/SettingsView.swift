@@ -1213,6 +1213,7 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
 
 struct AboutView: View {
     private let repoURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios")!
+    private let issuesURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios/issues")!
 
     var body: some View {
         ZStack {
@@ -1232,10 +1233,16 @@ struct AboutView: View {
                     .padding(.top, 20)
 
                     infoCard(title: "应用简介") {
-                        Text("通过蓝牙连接小米手环等标准心率设备，实时查看心率数值与曲线，支持画中画悬浮窗常亮展示、长时间心率记录与多格式数据导出。")
-                            .font(.system(size: 14))
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("通过蓝牙连接小米手环等标准心率设备，实时查看心率数值与曲线，支持画中画悬浮窗常亮展示、长时间心率记录与多格式数据导出。")
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("本应用主要在小米手环 9 Pro 上测试。其他设备如遇到连接或数据问题，欢迎在 GitHub Issues 中反馈。")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
 
                     infoCard(title: "项目信息") {
@@ -1251,6 +1258,12 @@ struct AboutView: View {
                                 Text("仓库地址")
                                 Spacer()
                                 Link("EPXiaohua/heartfloat-ios", destination: repoURL)
+                            }
+                            Divider()
+                            HStack {
+                                Text("问题反馈")
+                                Spacer()
+                                Link("GitHub Issues", destination: issuesURL)
                             }
                         }
                         .font(.system(size: 14))
