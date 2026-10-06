@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import UIKit
 import UniformTypeIdentifiers
 
 // 记录图表主题色（与主界面曲线一致）
@@ -293,11 +294,15 @@ struct PushServiceSettingsView: View {
     @EnvironmentObject var viewModel: HeartRateViewModel
     @ObservedObject private var httpServer = HttpServerManager.shared
     @ObservedObject private var wsServer = WsServerManager.shared
+    @Environment(\.openURL) private var openURL
 
     @State private var httpPort: String = "8080"
     @State private var wsPort: String = "8081"
     @State private var showingPortAlert = false
     @State private var portAlertMessage = ""
+    // 复制成功的顶部 Toast（设置页在 sheet 内，MainView 的 Toast 被遮挡，本页单独显示）
+    @State private var toastText: String?
+    @State private var toastToken = UUID()
 
     private let themeColor = Color(hex: "EC746F")
 
@@ -321,6 +326,17 @@ struct PushServiceSettingsView: View {
             Button("确定", role: .cancel) {}
         } message: {
             Text(portAlertMessage)
+        }
+        // 顶部 Toast（复制成功提示，复用全局毛玻璃样式）
+        .overlay(alignment: .top) {
+            VStack {
+                if let toast = toastText {
+                    ToastView(text: toast)
+                }
+                Spacer()
+            }
+            .animation(.easeInOut(duration: 0.2), value: toastText)
+            .allowsHitTesting(false)
         }
     }
 
@@ -477,6 +493,9 @@ struct PushServiceSettingsView: View {
             Text("本机地址")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
+            Text("单击打开 · 长按复制")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
 
             if httpServer.localIPs.isEmpty {
                 Text("未获取到可用的本机地址")
@@ -486,32 +505,60 @@ struct PushServiceSettingsView: View {
 
             ForEach(httpServer.localIPs, id: \.self) { ip in
                 if let url = URL(string: "\(scheme)://\(ip):\(port)/") {
-                    Link(destination: url) {
-                        HStack(spacing: 4) {
-                            Text("\(scheme)://\(ip):\(port)")
-                                .font(.system(size: 14, design: .monospaced))
-                            if scheme == "http" {
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.system(size: 11))
-                            }
+                    HStack(spacing: 4) {
+                        Text("\(scheme)://\(ip):\(port)")
+                            .font(.system(size: 14, design: .monospaced))
+                        if scheme == "http" {
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.system(size: 11))
                         }
-                        .foregroundColor(themeColor)
                     }
+                    .foregroundColor(themeColor)
+                    .contentShape(Rectangle())
+                    .gesture(copyOrOpenGesture(copyText: "\(scheme)://\(ip):\(port)", open: url))
                 }
             }
         }
     }
 
-    /// API 接口行：设备已获取到本机 IP 时渲染为可点击链接，直接在浏览器打开
+    // MARK: 复制 / 打开手势与 Toast
+
+    /// 长按复制 + 单击打开的互斥手势组合：长按优先，复制后松手不会误触发打开
+    private func copyOrOpenGesture(copyText: String, open url: URL?) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.5)
+            .onEnded { _ in
+                UIPasteboard.general.string = copyText
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showToast("已复制")
+            }
+            .exclusively(before: TapGesture().onEnded {
+                if let url = url {
+                    openURL(url)
+                }
+            })
+    }
+
+    /// 顶部 Toast（短暂显示后自动消失，连续触发时替换上一条不叠加）
+    private func showToast(_ text: String) {
+        toastToken = UUID()
+        toastText = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [token = toastToken] in
+            if token == toastToken {
+                toastText = nil
+            }
+        }
+    }
+
+    /// API 接口行：单击在浏览器打开，长按复制完整链接
     @ViewBuilder
     private func apiLink(_ path: String, _ desc: String, ip: String?, port: Int) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if let ip = ip, let url = URL(string: "http://\(ip):\(port)\(path)") {
-                Link(destination: url) {
-                    Text(path)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(themeColor)
-                }
+                Text(path)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(themeColor)
+                    .contentShape(Rectangle())
+                    .gesture(copyOrOpenGesture(copyText: url.absoluteString, open: url))
             } else {
                 Text(path)
                     .font(.system(size: 13, design: .monospaced))
