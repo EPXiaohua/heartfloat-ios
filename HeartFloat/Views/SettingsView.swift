@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import UniformTypeIdentifiers
 
 // 记录图表主题色（与主界面曲线一致）
 private let recordingThemeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
@@ -767,50 +768,165 @@ struct BleDeviceSettingsView: View {
 struct RecordingsListView: View {
     @EnvironmentObject var viewModel: HeartRateViewModel
 
+    @State private var showImporter = false
+    @State private var pendingDelete: HeartRateRecording?
+    @State private var importResult: ImportResult?
+
+    struct ImportResult: Identifiable {
+        let id = UUID()
+        let success: Bool
+        let message: String
+    }
+
+    /// 导入的记录单独分组展示，与自测记录区分
+    private var importedRecordings: [HeartRateRecording] {
+        viewModel.recordings.filter { $0.imported }
+    }
+    private var myRecordings: [HeartRateRecording] {
+        viewModel.recordings.filter { !$0.imported }
+    }
+
     var body: some View {
-        Group {
-            if viewModel.recordings.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "waveform.path.ecg")
-                        .font(.system(size: 40))
-                        .foregroundColor(Color(.tertiaryLabel))
-                    Text("还没有心率记录")
-                        .font(.system(size: 15, weight: .medium))
-                    Text("连接手环后，在主界面点「开始记录」")
-                        .font(.system(size: 12))
-                }
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(viewModel.recordings) { recording in
-                        NavigationLink(destination: RecordingDetailView(recording: recording)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(Self.dateText(recording.startedAt))
-                                    .font(.system(size: 15, weight: .medium))
-                                HStack(spacing: 14) {
-                                    Text("时长 \(recording.durationText)")
-                                    Text("平均 \(recording.averageBpm.map { String(format: "%.0f", $0) } ?? "--") BPM")
-                                    Text("\(recording.samples.count) 点")
-                                }
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 4)
+        ZStack {
+            List {
+                if !importedRecordings.isEmpty {
+                    Section("导入的记录") {
+                        ForEach(importedRecordings) { recording in
+                            row(recording)
                         }
+                        .onDelete { requestDelete(offsets: $0, in: importedRecordings) }
                     }
-                    .onDelete { viewModel.deleteRecordings(at: $0) }
                 }
-                .listStyle(.insetGrouped)
+
+                Section("我的记录") {
+                    if myRecordings.isEmpty {
+                        Text(myRecordingsPlaceholder)
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    ForEach(myRecordings) { recording in
+                        row(recording)
+                    }
+                    .onDelete { requestDelete(offsets: $0, in: myRecordings) }
+                }
+            }
+            .listStyle(.insetGrouped)
+
+            // 删除确认（防误删）
+            if let pending = pendingDelete {
+                GlassAlertOverlay(
+                    iconName: "trash",
+                    iconColor: .red,
+                    title: "删除记录？",
+                    message: "删除「\(Self.shortDateText(pending.startedAt))」的记录后无法恢复",
+                    confirmTitle: "删除",
+                    confirmDestructive: true,
+                    onConfirm: {
+                        viewModel.deleteRecording(pending)
+                        pendingDelete = nil
+                    },
+                    onCancel: { pendingDelete = nil }
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
+
+            // 导入结果
+            if let result = importResult {
+                GlassAlertOverlay(
+                    iconName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill",
+                    iconColor: result.success ? .green : .red,
+                    title: result.success ? "导入成功" : "导入失败",
+                    message: result.message,
+                    confirmTitle: "知道",
+                    cancelTitle: nil,
+                    onConfirm: { importResult = nil }
+                )
+                .transition(.opacity)
+                .zIndex(11)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: pendingDelete?.id)
+        .animation(.easeInOut(duration: 0.2), value: importResult?.id)
         .navigationTitle("心率记录")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showImporter = true
+                }) {
+                    Image(systemName: "square.and.arrow.down")
+                }
+            }
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.json, .commaSeparatedText],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                do {
+                    try viewModel.importRecording(from: url)
+                    importResult = ImportResult(success: true, message: "已导入到「导入的记录」分组，可点击查看详情")
+                } catch {
+                    importResult = ImportResult(success: false, message: error.localizedDescription)
+                }
+            case .failure(let error):
+                importResult = ImportResult(success: false, message: error.localizedDescription)
+            }
+        }
+    }
+
+    private var myRecordingsPlaceholder: String {
+        importedRecordings.isEmpty
+            ? "还没有记录。点击右上角导入心率文件，或连接手环后在主界面开始记录"
+            : "暂无自测记录。点击右上角导入心率文件，或连接手环后在主界面开始记录"
+    }
+
+    private func requestDelete(offsets: IndexSet, in list: [HeartRateRecording]) {
+        guard let index = offsets.first, list.indices.contains(index) else { return }
+        pendingDelete = list[index]
+    }
+
+    private func row(_ recording: HeartRateRecording) -> some View {
+        NavigationLink(destination: RecordingDetailView(recording: recording)) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(Self.dateText(recording.startedAt))
+                        .font(.system(size: 15, weight: .medium))
+                    if recording.imported {
+                        Text("导入")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue, in: Capsule())
+                    }
+                }
+                HStack(spacing: 14) {
+                    Text("时长 \(recording.durationText)")
+                    Text("平均 \(recording.averageBpm.map { String(format: "%.0f", $0) } ?? "--") BPM")
+                    Text("\(recording.samples.count) 点")
+                }
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
     }
 
     private static func dateText(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
+    }
+
+    private static func shortDateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter.string(from: date)
     }
 }
@@ -1256,7 +1372,7 @@ struct AboutView: View {
                                 .font(.system(size: 14))
                                 .foregroundColor(.primary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("HeartFloat 没什么大本事，只是想让你的心率一直悬在屏幕上——看得见，别不当回事。")
+                            Text("HeartFloat 没什么大本事，只是想让你的心率一直悬在屏幕上——看得见，别不当回事（）")
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)

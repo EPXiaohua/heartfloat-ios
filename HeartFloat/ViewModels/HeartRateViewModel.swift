@@ -245,11 +245,56 @@ class HeartRateViewModel: NSObject, ObservableObject {
         pendingUnsavedRecording = nil
     }
 
-    func deleteRecordings(at offsets: IndexSet) {
-        for index in offsets {
-            HeartRateRecordingStore.delete(recordings[index])
-        }
+    func deleteRecording(_ recording: HeartRateRecording) {
+        HeartRateRecordingStore.delete(recording)
         recordings = HeartRateRecordingStore.loadAll()
+    }
+
+    enum ImportError: LocalizedError {
+        case unrecognizedFormat
+
+        var errorDescription: String? {
+            switch self {
+            case .unrecognizedFormat:
+                return "无法识别的文件格式，请导入本应用导出的 JSON 或 CSV 文件"
+            }
+        }
+    }
+
+    /// 从文件导入心率记录（支持本应用导出的 JSON 与 CSV 格式），导入的记录单独分组展示
+    func importRecording(from url: URL) throws {
+        let secured = url.startAccessingSecurityScopedResource()
+        defer { if secured { url.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: url)
+
+        // 优先按 JSON（本应用导出格式）解析，失败再按 CSV 解析
+        var session = HeartRateRecordingStore.decode(data)
+        if session == nil, let text = String(data: data, encoding: .utf8) {
+            session = Self.parseCSV(text)
+        }
+        guard var record = session, record.samples.count >= 2 else {
+            throw ImportError.unrecognizedFormat
+        }
+        record.imported = true
+        record.startedAt = record.samples.first?.t ?? record.startedAt
+        record.endedAt = record.samples.last?.t ?? record.endedAt
+        HeartRateRecordingStore.save(record)
+        recordings = HeartRateRecordingStore.loadAll()
+    }
+
+    /// 解析本应用导出的 CSV（timestamp,bpm，ISO8601 时间）
+    private static func parseCSV(_ text: String) -> HeartRateRecording? {
+        var samples: [HeartRateRecording.Sample] = []
+        let lines = text.components(separatedBy: .newlines)
+        for line in lines.dropFirst() {
+            let parts = line.trimmingCharacters(in: .whitespaces).split(separator: ",")
+            guard parts.count >= 2,
+                  let t = HeartRateRecordingStore.iso8601.date(from: String(parts[0])),
+                  let bpm = Int(parts[1]) else { continue }
+            samples.append(.init(t: t, bpm: bpm))
+        }
+        guard samples.count >= 2 else { return nil }
+        return HeartRateRecording(startedAt: samples[0].t, endedAt: samples[samples.count - 1].t, samples: samples)
     }
 
     func togglePip() {
@@ -596,6 +641,26 @@ struct HeartRateRecording: Identifiable, Codable {
     var startedAt: Date
     var endedAt: Date
     var samples: [Sample] = []
+    /// 是否为外部导入的记录（列表中与自测记录分组展示）
+    var imported: Bool = false
+
+    init(startedAt: Date, endedAt: Date, samples: [Sample] = [], imported: Bool = false) {
+        self.id = UUID()
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.samples = samples
+        self.imported = imported
+    }
+
+    /// 兼容旧格式文件：imported 字段缺失时按自测记录处理
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decode(Date.self, forKey: .endedAt)
+        samples = try container.decodeIfPresent([Sample].self, forKey: .samples) ?? []
+        imported = try container.decodeIfPresent(Bool.self, forKey: .imported) ?? false
+    }
 
     var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
     var durationText: String { Self.format(duration: duration) }
@@ -667,6 +732,11 @@ enum HeartRateRecordingStore {
 
     static func loadUnsaved() -> HeartRateRecording? {
         guard let data = try? Data(contentsOf: unsavedURL) else { return nil }
+        return decode(data)
+    }
+
+    /// 按本应用 JSON 格式解码（ISO8601 日期，兼容缺少字段的旧文件）
+    static func decode(_ data: Data) -> HeartRateRecording? {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(HeartRateRecording.self, from: data)
