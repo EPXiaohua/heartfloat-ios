@@ -116,7 +116,16 @@ struct MainView: View {
                 }
                 .zIndex(12)
             }
+            // 顶部 Toast（自动保存等提示）
+            VStack {
+                if let toastText = viewModel.toastText {
+                    ToastView(text: toastText)
+                }
+                Spacer()
+            }
+            .zIndex(30)
         }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.toastText)
         .animation(.easeInOut(duration: 0.2), value: viewModel.showConnectionOverlay)
         .animation(.easeInOut(duration: 0.2), value: showStopConfirm)
         .animation(.easeInOut(duration: 0.2), value: showDisconnectConfirm)
@@ -920,6 +929,36 @@ struct AnchoredMenuOverlay: View {
     private static func estimatedHeight(for items: [AnchoredMenuItem]) -> CGFloat {
         let rowHeight: CGFloat = items.contains { $0.subtitle != nil } ? 52 : 38
         return CGFloat(items.count) * rowHeight + 12
+    }
+}
+
+// MARK: - Toast 提示（毛玻璃胶囊，自动消失）
+
+struct ToastView: View {
+    let text: String
+
+    @State private var appeared = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.primary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.15), radius: 16, y: 5)
+        // 开场：淡入 + spring 展开
+        .scaleEffect(appeared ? 1 : 0.85)
+        .opacity(appeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+                appeared = true
+            }
+        }
     }
 }
 

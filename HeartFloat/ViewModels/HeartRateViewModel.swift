@@ -29,6 +29,11 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
     /// 上次异常退出遗留的未保存记录（启动时检测，弹窗询问保存或丢弃）
     @Published var pendingUnsavedRecording: HeartRateRecording?
+    /// 顶部 Toast 提示文本（自动保存等），短暂显示后自动消失
+    @Published var toastText: String?
+    /// 用户主动断开标记（用于区分断连 Toast 文案）
+    private var userInitiatedDisconnect = false
+    private var toastToken: UUID?
     /// 当前连接的设备名
     @Published var connectedDeviceName: String = ""
     /// 心率采样点（时间戳 + 值）：每次采样无条件追加，曲线按绝对时间轴绘制，
@@ -113,8 +118,13 @@ class HeartRateViewModel: NSObject, ObservableObject {
                 if state == .disconnected || state == .failed {
                     // 记录进行中随断连结束：数据源已消失，自动保存本次会话
                     if self.isRecording {
-                        self.stopRecording()
+                        if self.userInitiatedDisconnect {
+                            self.stopRecording(showToast: "记录已自动保存")
+                        } else {
+                            self.stopRecording(showToast: "连接已断开，记录已自动保存")
+                        }
                     }
+                    self.userInitiatedDisconnect = false
                     self.heartRate = 0
                     self.pipOverlay?.update(heartRate: 0)
                     self.isContact = false
@@ -172,6 +182,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        userInitiatedDisconnect = true
         bleService.disconnect()
     }
 
@@ -185,7 +196,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
         isRecording = true
     }
 
-    func stopRecording() {
+    func stopRecording(showToast text: String? = "记录已保存") {
         guard isRecording, var session = activeRecording else { return }
         session.endedAt = Date()
         isRecording = false
@@ -196,6 +207,24 @@ class HeartRateViewModel: NSObject, ObservableObject {
         guard session.samples.count >= 2 else { return }
         HeartRateRecordingStore.save(session)
         recordings = HeartRateRecordingStore.loadAll()
+        if let text = text {
+            showToast(text)
+        }
+    }
+
+    /// 顶部 Toast 提示，短暂显示后自动消失
+    func showToast(_ text: String) {
+        let token = UUID()
+        toastToken = token
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+            toastText = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            guard let self = self, self.toastToken == token else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                self.toastText = nil
+            }
+        }
     }
 
     /// 保存上次异常退出遗留的记录（时长以最后一个采样点为准）
