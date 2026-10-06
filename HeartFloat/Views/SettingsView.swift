@@ -966,6 +966,8 @@ struct RecordingsListView: View {
                             row(recording)
                         }
                         .onDelete(perform: isSelecting ? nil : { requestDelete(offsets: $0, in: importedRecordings) })
+                        // 选择模式下隐藏编辑模式的减号删除控件
+                        .deleteDisabled(isSelecting)
                     }
                 }
 
@@ -979,6 +981,7 @@ struct RecordingsListView: View {
                         row(recording)
                     }
                     .onDelete(perform: isSelecting ? nil : { requestDelete(offsets: $0, in: myRecordings) })
+                    .deleteDisabled(isSelecting)
                 }
             }
             .listStyle(.insetGrouped)
