@@ -936,12 +936,10 @@ struct RecordingsListView: View {
     @State private var showImporter = false
     @State private var pendingDelete: HeartRateRecording?
     @State private var importResult: ImportResult?
-    // 批量删除（编辑模式多选）
-    @State private var editMode: EditMode = .inactive
+    // 批量删除（自绘多选：不用系统编辑模式，从根上避开减号删除控件）
+    @State private var isSelecting = false
     @State private var selectedIDs: Set<UUID> = []
     @State private var showBatchDeleteConfirm = false
-
-    private var isSelecting: Bool { editMode == .active }
 
     struct ImportResult: Identifiable {
         let id = UUID()
@@ -959,15 +957,13 @@ struct RecordingsListView: View {
 
     var body: some View {
         ZStack {
-            List(selection: $selectedIDs) {
+            List {
                 if !importedRecordings.isEmpty {
                     Section("导入的记录") {
                         ForEach(importedRecordings) { recording in
                             row(recording)
                         }
                         .onDelete(perform: isSelecting ? nil : { requestDelete(offsets: $0, in: importedRecordings) })
-                        // 选择模式下隐藏编辑模式的减号删除控件
-                        .deleteDisabled(isSelecting)
                     }
                 }
 
@@ -981,11 +977,9 @@ struct RecordingsListView: View {
                         row(recording)
                     }
                     .onDelete(perform: isSelecting ? nil : { requestDelete(offsets: $0, in: myRecordings) })
-                    .deleteDisabled(isSelecting)
                 }
             }
             .listStyle(.insetGrouped)
-            .environment(\.editMode, $editMode)
             .safeAreaInset(edge: .bottom) {
                 if isSelecting {
                     batchBar
@@ -1024,7 +1018,7 @@ struct RecordingsListView: View {
                         viewModel.deleteRecordings(withIDs: selectedIDs)
                         selectedIDs = []
                         withAnimation(.easeInOut(duration: 0.25)) {
-                            editMode = .inactive
+                            isSelecting = false
                         }
                         showBatchDeleteConfirm = false
                     },
@@ -1111,7 +1105,7 @@ struct RecordingsListView: View {
     private func toggleSelection() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         withAnimation(.easeInOut(duration: 0.25)) {
-            editMode = editMode == .active ? .inactive : .active
+            isSelecting.toggle()
         }
         if !isSelecting {
             selectedIDs = []
@@ -1158,8 +1152,31 @@ struct RecordingsListView: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    /// 选择模式：整行变多选按钮（自绘勾选圈）；普通模式：进详情
     private func row(_ recording: HeartRateRecording) -> some View {
-        NavigationLink(destination: RecordingDetailView(recording: recording)) {
+        Group {
+            if isSelecting {
+                Button {
+                    toggleSelect(recording)
+                } label: {
+                    rowContent(recording, selected: selectedIDs.contains(recording.id))
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink(destination: RecordingDetailView(recording: recording)) {
+                    rowContent(recording, selected: false)
+                }
+            }
+        }
+    }
+
+    private func rowContent(_ recording: HeartRateRecording, selected: Bool) -> some View {
+        HStack(spacing: 10) {
+            if isSelecting {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundColor(selected ? recordingThemeColor : Color(.systemGray3))
+            }
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(Self.dateText(recording.startedAt))
@@ -1181,7 +1198,17 @@ struct RecordingsListView: View {
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
             }
-            .padding(.vertical, 4)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    private func toggleSelect(_ recording: HeartRateRecording) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedIDs.contains(recording.id) {
+            selectedIDs.remove(recording.id)
+        } else {
+            selectedIDs.insert(recording.id)
         }
     }
 
