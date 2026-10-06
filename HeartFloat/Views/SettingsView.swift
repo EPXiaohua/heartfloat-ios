@@ -1214,6 +1214,7 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
 struct AboutView: View {
     private let repoURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios")!
     private let issuesURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios/issues")!
+    private let androidURL = URL(string: "https://github.com/EPXiaohua/heartfloat-android")!
 
     var body: some View {
         ZStack {
@@ -1242,6 +1243,25 @@ struct AboutView: View {
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    infoCard(title: "关于安卓版") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("之前还做过一个安卓版的 HeartFloat，不过已经弃坑了——UI 难看、BUG 也多，唯一的亮点是 HTTP 直播页有多个预设（但也就那样吧）。")
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("所以别问我安卓版什么时候更新——你跑不过我你信吗？我做 iOS 的人。")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            HStack {
+                                Text("仓库地址")
+                                Spacer()
+                                Link("heartfloat-android", destination: androidURL)
+                            }
+                            .font(.system(size: 14))
                         }
                     }
 
