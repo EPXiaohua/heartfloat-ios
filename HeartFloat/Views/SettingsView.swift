@@ -515,28 +515,21 @@ struct PushServiceSettingsView: View {
                     }
                     .foregroundColor(themeColor)
                     .contentShape(Rectangle())
-                    .gesture(copyOrOpenGesture(copyText: "\(scheme)://\(ip):\(port)", open: url))
+                    // 手势顺序照搬主界面记录 chip 的验证组合：单击在前不吞点击，长按复制后松手也不会误触发打开
+                    .onTapGesture {
+                        openURL(url)
+                    }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        UIPasteboard.general.string = "\(scheme)://\(ip):\(port)"
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showToast("已复制")
+                    }
                 }
             }
         }
     }
 
     // MARK: 复制 / 打开手势与 Toast
-
-    /// 长按复制 + 单击打开的互斥手势组合：长按优先，复制后松手不会误触发打开
-    private func copyOrOpenGesture(copyText: String, open url: URL?) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.5)
-            .onEnded { _ in
-                UIPasteboard.general.string = copyText
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                showToast("已复制")
-            }
-            .exclusively(before: TapGesture().onEnded {
-                if let url = url {
-                    openURL(url)
-                }
-            })
-    }
 
     /// 顶部 Toast（短暂显示后自动消失，连续触发时替换上一条不叠加）
     private func showToast(_ text: String) {
@@ -558,7 +551,14 @@ struct PushServiceSettingsView: View {
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(themeColor)
                     .contentShape(Rectangle())
-                    .gesture(copyOrOpenGesture(copyText: url.absoluteString, open: url))
+                    .onTapGesture {
+                        openURL(url)
+                    }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        UIPasteboard.general.string = url.absoluteString
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showToast("已复制")
+                    }
             } else {
                 Text(path)
                     .font(.system(size: 13, design: .monospaced))
