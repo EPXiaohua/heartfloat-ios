@@ -25,8 +25,8 @@ struct SettingsView: View {
                     NavigationLink(destination: BleDeviceSettingsView()) {
                         Label("蓝牙设备", systemImage: "antenna.radiowaves.left.and.right")
                     }
-                    NavigationLink(destination: HttpPushSettingsView()) {
-                        Label("联网推送", systemImage: "dot.radiowaves.up.forward")
+                    NavigationLink(destination: PushServiceSettingsView()) {
+                        Label("推送服务", systemImage: "dot.radiowaves.up.forward")
                     }
                     NavigationLink(destination: StorageManageView()) {
                         Label("存储管理", systemImage: "internaldrive")
@@ -286,38 +286,52 @@ struct PipSettingsView: View {
     }
 }
 
-// MARK: - 联网推送
+// MARK: - 推送服务（HTTP + WebSocket）
 
-struct HttpPushSettingsView: View {
+struct PushServiceSettingsView: View {
     @EnvironmentObject var settings: SettingsManager
     @EnvironmentObject var viewModel: HeartRateViewModel
+    @ObservedObject private var httpServer = HttpServerManager.shared
+    @ObservedObject private var wsServer = WsServerManager.shared
 
     @State private var httpPort: String = "8080"
-    @State private var showingHttpAlert = false
-    @State private var httpAlertMessage = ""
+    @State private var wsPort: String = "8081"
+    @State private var showingPortAlert = false
+    @State private var portAlertMessage = ""
 
     private let themeColor = Color(hex: "EC746F")
 
     var body: some View {
         ScrollView {
-            httpPushSection
-                .padding()
+            VStack(spacing: 16) {
+                httpPushSection
+                wsPushSection
+                networkNote
+            }
+            .padding()
         }
-        .navigationTitle("联网推送")
+        .navigationTitle("推送服务")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("提示", isPresented: $showingHttpAlert) {
+        .onAppear {
+            httpPort = "\(settings.httpPushPort)"
+            wsPort = "\(settings.wsPushPort)"
+            httpServer.refreshIPs()
+        }
+        .alert("提示", isPresented: $showingPortAlert) {
             Button("确定", role: .cancel) {}
         } message: {
-            Text(httpAlertMessage)
+            Text(portAlertMessage)
         }
     }
 
+    // MARK: HTTP 实时推送
+
     private var httpPushSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("联网推送")
+            Text("HTTP 实时推送")
                 .font(.system(size: 16, weight: .bold))
 
-            Toggle("启用HTTP推送", isOn: $settings.httpPushEnabled)
+            Toggle("启用 HTTP 推送", isOn: $settings.httpPushEnabled)
                 .onChange(of: settings.httpPushEnabled) { enabled in
                     if enabled {
                         viewModel.startHttpServer(port: settings.httpPushPort)
@@ -335,53 +349,157 @@ struct HttpPushSettingsView: View {
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .frame(width: 100)
 
-                    Button("应用") {
-                        if let port = Int(httpPort), port >= 1024 && port <= 65535 {
-                            settings.httpPushPort = port
-                            if settings.httpPushEnabled {
-                                viewModel.stopHttpServer()
-                                viewModel.startHttpServer(port: port)
-                            }
-                            httpAlertMessage = "端口已应用"
-                            showingHttpAlert = true
-                        } else {
-                            httpAlertMessage = "无效的端口号（1024-65535）"
-                            showingHttpAlert = true
-                        }
-                    }
-                    .foregroundColor(themeColor)
+                    Button("应用", action: applyHttpPort)
+                        .foregroundColor(themeColor)
                 }
 
-                if let ip = HttpServerManager.shared.localIP {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("本机地址")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Link(destination: URL(string: "http://\(ip):\(settings.httpPushPort)/")!) {
-                            HStack(spacing: 4) {
-                                Text("http://\(ip):\(settings.httpPushPort)")
-                                    .font(.system(size: 14, design: .monospaced))
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.system(size: 11))
-                            }
-                            .foregroundColor(themeColor)
-                        }
-                    }
-                }
+                addressLinks(scheme: "http", port: settings.httpPushPort)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("API 接口（点击可直接打开）")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
-                    apiLink("/heartbeat", "返回纯文本心率值", ip: HttpServerManager.shared.localIP, port: settings.httpPushPort)
-                    apiLink("/heartbeat.json", "返回 JSON 格式数据", ip: HttpServerManager.shared.localIP, port: settings.httpPushPort)
-                    apiLink("/live", "直播悬浮页（可作 OBS 浏览器源）", ip: HttpServerManager.shared.localIP, port: settings.httpPushPort)
+                    apiLink("/heartbeat", "返回纯文本心率值", ip: httpServer.localIPs.first, port: settings.httpPushPort)
+                    apiLink("/heartbeat.json", "返回 JSON 格式数据", ip: httpServer.localIPs.first, port: settings.httpPushPort)
+                    apiLink("/live", "直播悬浮页（可作 OBS 浏览器源）", ip: httpServer.localIPs.first, port: settings.httpPushPort)
                 }
             }
         }
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+    }
+
+    // MARK: WebSocket 实时推送
+
+    private var wsPushSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("WebSocket 实时推送")
+                .font(.system(size: 16, weight: .bold))
+
+            Toggle("启用 WebSocket 推送", isOn: $settings.wsPushEnabled)
+                .onChange(of: settings.wsPushEnabled) { enabled in
+                    if enabled {
+                        wsServer.startServer(port: settings.wsPushPort)
+                    } else {
+                        wsServer.stopServer()
+                    }
+                }
+
+            if settings.wsPushEnabled {
+                HStack {
+                    Text("端口")
+                        .foregroundColor(.secondary)
+                    TextField("端口号", text: $wsPort)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .frame(width: 100)
+
+                    Button("应用", action: applyWsPort)
+                        .foregroundColor(themeColor)
+                }
+
+                HStack {
+                    Text("状态")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    if wsServer.isRunning {
+                        Label(wsServer.clientCount > 0 ? "\(wsServer.clientCount) 个连接" : "运行中",
+                              systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(.green)
+                    } else {
+                        Text("未运行")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                addressLinks(scheme: "ws", port: wsServer.currentPort)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+
+    // MARK: 网络环境说明
+
+    private var networkNote: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("关于网络环境", systemImage: "info.circle")
+                .font(.system(size: 13, weight: .semibold))
+            Text("同一 WiFi 下设备可直接访问以上地址；蜂窝数据下手机拿到的是运营商内网地址，外部设备无法直接连入，建议使用 WiFi 或开启个人热点。")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+
+    // MARK: 端口应用
+
+    private func applyHttpPort() {
+        if let port = Int(httpPort), port >= 1024 && port <= 65535 {
+            settings.httpPushPort = port
+            if settings.httpPushEnabled {
+                viewModel.stopHttpServer()
+                viewModel.startHttpServer(port: port)
+            }
+            portAlertMessage = "端口已应用"
+        } else {
+            portAlertMessage = "无效的端口号（1024-65535）"
+        }
+        showingPortAlert = true
+    }
+
+    private func applyWsPort() {
+        if let port = Int(wsPort), port >= 1024 && port <= 65535 {
+            settings.wsPushPort = port
+            if settings.wsPushEnabled {
+                wsServer.stopServer()
+                wsServer.startServer(port: port)
+            }
+            portAlertMessage = "端口已应用"
+        } else {
+            portAlertMessage = "无效的端口号（1024-65535）"
+        }
+        showingPortAlert = true
+    }
+
+    // MARK: 本机地址列表（多网络接口）
+
+    @ViewBuilder
+    private func addressLinks(scheme: String, port: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("本机地址")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+
+            if httpServer.localIPs.isEmpty {
+                Text("未获取到可用的本机地址")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(httpServer.localIPs, id: \.self) { ip in
+                if let url = URL(string: "\(scheme)://\(ip):\(port)/") {
+                    Link(destination: url) {
+                        HStack(spacing: 4) {
+                            Text("\(scheme)://\(ip):\(port)")
+                                .font(.system(size: 14, design: .monospaced))
+                            if scheme == "http" {
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.system(size: 11))
+                            }
+                        }
+                        .foregroundColor(themeColor)
+                    }
+                }
+            }
+        }
     }
 
     /// API 接口行：设备已获取到本机 IP 时渲染为可点击链接，直接在浏览器打开

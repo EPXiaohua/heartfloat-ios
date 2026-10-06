@@ -14,6 +14,8 @@ class SettingsManager: ObservableObject {
     @AppStorage("backgroundBrightness") var backgroundBrightness: Double = 0
     @AppStorage("httpPushEnabled") var httpPushEnabled: Bool = false
     @AppStorage("httpPushPort") var httpPushPort: Int = 8080
+    @AppStorage("wsPushEnabled") var wsPushEnabled: Bool = false
+    @AppStorage("wsPushPort") var wsPushPort: Int = 8081
 
     var bpmNumberColor: Color {
         get { Color(hex: bpmNumberColorHex) }

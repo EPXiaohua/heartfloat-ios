@@ -49,6 +49,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
     private let bleService = BleService.shared
     private let httpServer = HttpServerManager.shared
+    private let wsServer = WsServerManager.shared
     private let settings = SettingsManager.shared
     private let renderer = HeartRateVideoRenderer.shared
     private var cancellables = Set<AnyCancellable>()
@@ -66,6 +67,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
         recordings = HeartRateRecordingStore.loadAll()
         pendingUnsavedRecording = HeartRateRecordingStore.loadUnsaved()
         setupBindings()
+        startConfiguredServers()
     }
 
     deinit {
@@ -79,6 +81,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
             .sink { [weak self] rate in
                 guard let self = self else { return }
                 self.httpServer.updateHeartRate(rate, contact: self.isContact)
+                self.wsServer.updateHeartRate(rate, contact: self.isContact)
 
                 // 无读数（断连归零）不记录采样点
                 if rate > 0 {
@@ -477,7 +480,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - HTTP 服务
+    // MARK: - 推送服务（HTTP / WebSocket）
 
     func startHttpServer(port: Int) {
         if httpServer.startServer(port: port) {
@@ -490,6 +493,16 @@ class HeartRateViewModel: NSObject, ObservableObject {
     func stopHttpServer() {
         httpServer.stopServer()
         addLog("HTTP服务已停止")
+    }
+
+    /// 按设置自启推送服务：上次开启过则随应用启动自动运行
+    private func startConfiguredServers() {
+        if settings.httpPushEnabled {
+            startHttpServer(port: settings.httpPushPort)
+        }
+        if settings.wsPushEnabled {
+            wsServer.startServer(port: settings.wsPushPort)
+        }
     }
 }
 

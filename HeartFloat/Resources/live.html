@@ -43,15 +43,74 @@
     <span class="unit">BPM</span>
   </div>
 <script>
-  function refresh() {
-    fetch('/heartbeat.json').then(function (r) { return r.json(); }).then(function (d) {
-      var bpm = d.bpm > 0 ? d.bpm : null;
-      document.getElementById('bpm').textContent = bpm || '--';
-      document.getElementById('heart').style.animationDuration = bpm ? (60 / bpm) + 's' : '1s';
-    }).catch(function () {});
-  }
-  refresh();
-  setInterval(refresh, 500);
+  (function () {
+    var bpmEl = document.getElementById('bpm');
+    var heartEl = document.getElementById('heart');
+    var ws = null;
+    var pollTimer = null;
+    var reconnectTimer = null;
+
+    function apply(bpm) {
+      bpmEl.textContent = bpm || '--';
+      heartEl.style.animationDuration = bpm ? (60 / bpm) + 's' : '1s';
+    }
+
+    // 轮询兜底：WebSocket 不可用时自动启用
+    function startPolling() {
+      if (pollTimer) return;
+      pollTimer = setInterval(pollOnce, 500);
+      pollOnce();
+    }
+
+    function stopPolling() {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+
+    function pollOnce() {
+      fetch('/heartbeat.json').then(function (r) { return r.json(); }).then(function (d) {
+        apply(d.bpm > 0 ? d.bpm : null);
+      }).catch(function () {});
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      reconnectTimer = setTimeout(function () {
+        reconnectTimer = null;
+        connect();
+      }, 3000);
+    }
+
+    // WebSocket 实时推送：服务端每次心率采样主动广播
+    function connect() {
+      if (!location.hostname) { startPolling(); return; }
+      try {
+        ws = new WebSocket('ws://' + location.hostname + ':__WS_PORT__');
+      } catch (e) {
+        ws = null;
+        startPolling();
+        return;
+      }
+      ws.onopen = function () { stopPolling(); };
+      ws.onmessage = function (ev) {
+        try {
+          var d = JSON.parse(ev.data);
+          apply(d.bpm > 0 ? d.bpm : null);
+        } catch (e) {}
+      };
+      ws.onclose = function () {
+        stopPolling();
+        startPolling();
+        scheduleReconnect();
+      };
+      ws.onerror = function () { try { ws.close(); } catch (e) {} };
+    }
+
+    connect();
+    // WS 暂未连上时先走轮询兜底，连上后自动停止
+    setTimeout(function () {
+      if (!ws || ws.readyState !== 1) startPolling();
+    }, 1500);
+  })();
 </script>
 </body>
 </html>
