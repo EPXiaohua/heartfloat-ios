@@ -727,8 +727,10 @@ enum HeartRateRecordingStore {
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        // 排除未保存快照 unsaved.json：它是崩溃恢复依据，不是正式记录（丢弃后不应残留在列表里）
+        let unsavedName = unsavedURL.lastPathComponent
         return files
-            .filter { $0.pathExtension.lowercased() == "json" }
+            .filter { $0.pathExtension.lowercased() == "json" && $0.lastPathComponent != unsavedName }
             .compactMap { url in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? decoder.decode(HeartRateRecording.self, from: data)
