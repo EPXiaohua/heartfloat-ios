@@ -1246,15 +1246,28 @@ struct AboutView: View {
                         }
                     }
 
-                    infoCard(title: "关于安卓版") {
+                    infoCard(title: "为什么做心率悬浮窗") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("之前还做过一个安卓版的 HeartFloat，不过已经弃坑了——UI 难看、BUG 也多，唯一的亮点是 HTTP 直播页有多个预设（但也就那样吧）。")
+                            Text("2023 年，张雪峰老师在直播里被网友提醒嘴唇发紫、建议查查心脏，他回了一句：“你跑不过我你信吗？我跑半马的人，你说我心脏不好？”")
                                 .font(.system(size: 14))
                                 .foregroundColor(.primary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("所以别问我安卓版什么时候更新——你跑不过我你信吗？我做 iOS 的人。")
+                            Text("2026 年 3 月，他因心源性猝死离世，年仅 41 岁。身体的信号，往往来得比想象中早。")
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("HeartFloat 没什么大本事，只是想让你的心率一直悬在屏幕上——看得见，别不当回事。")
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    infoCard(title: "关于安卓版") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("之前还做过一个安卓版的 HeartFloat，不过已经弃坑了——UI 难看、BUG 也多，唯一的亮点是 HTTP 直播页有多个预设（但也就那样吧）。所以别指望我更新它，精力都在 iOS 版上。")
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             HStack {
                                 Text("仓库地址")
