@@ -31,6 +31,9 @@ class HeartRateViewModel: NSObject, ObservableObject {
     @Published var pendingUnsavedRecording: HeartRateRecording?
     /// 顶部 Toast 提示文本（自动保存等），短暂显示后自动消失
     @Published var toastText: String?
+    /// Toast 图标与颜色（默认绿色对勾，更新提示等场景可换）
+    @Published var toastIcon: String = "checkmark.circle.fill"
+    @Published var toastIconColor: Color = .green
     /// 用户主动断开标记（用于区分断连 Toast 文案）
     private var userInitiatedDisconnect = false
     private var toastToken: UUID?
@@ -50,6 +53,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
     private let bleService = BleService.shared
     private let httpServer = HttpServerManager.shared
     private let wsServer = WsServerManager.shared
+    private let updateChecker = UpdateChecker.shared
     private let settings = SettingsManager.shared
     private let renderer = HeartRateVideoRenderer.shared
     private var cancellables = Set<AnyCancellable>()
@@ -68,6 +72,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
         pendingUnsavedRecording = HeartRateRecordingStore.loadUnsaved()
         setupBindings()
         startConfiguredServers()
+        startUpdateCheck()
     }
 
     deinit {
@@ -216,9 +221,11 @@ class HeartRateViewModel: NSObject, ObservableObject {
     }
 
     /// 顶部 Toast 提示，短暂显示后自动消失
-    func showToast(_ text: String) {
+    func showToast(_ text: String, icon: String = "checkmark.circle.fill", iconColor: Color = .green) {
         let token = UUID()
         toastToken = token
+        toastIcon = icon
+        toastIconColor = iconColor
         withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
             toastText = text
         }
@@ -502,6 +509,18 @@ class HeartRateViewModel: NSObject, ObservableObject {
         }
         if settings.wsPushEnabled {
             wsServer.startServer(port: settings.wsPushPort)
+        }
+    }
+
+    /// 启动静默检查更新：发现新版本才 Toast 提示，其余情况（已是最新/网络失败）不打扰
+    private func startUpdateCheck() {
+        guard settings.checkUpdatesEnabled else { return }
+        updateChecker.checkOnLaunch { [weak self] release in
+            self?.showToast(
+                "发现新版本 \(release.version)，详情见关于页",
+                icon: "arrow.down.circle.fill",
+                iconColor: Color(red: 0.46, green: 0.73, blue: 1.0)
+            )
         }
     }
 }

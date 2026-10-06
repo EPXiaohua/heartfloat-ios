@@ -16,6 +16,7 @@ class SettingsManager: ObservableObject {
     @AppStorage("httpPushPort") var httpPushPort: Int = 8080
     @AppStorage("wsPushEnabled") var wsPushEnabled: Bool = false
     @AppStorage("wsPushPort") var wsPushPort: Int = 8081
+    @AppStorage("checkUpdatesEnabled") var checkUpdatesEnabled: Bool = true
 
     var bpmNumberColor: Color {
         get { Color(hex: bpmNumberColorHex) }
@@ -96,5 +97,84 @@ extension Color {
         let g = Int(components[1] * 255)
         let b = Int(components[2] * 255)
         return String(format: "%02X%02X%02X", r, g, b)
+    }
+}
+
+// MARK: - 自动检查更新（GitHub Releases）
+
+class UpdateChecker: ObservableObject {
+    static let shared = UpdateChecker()
+    static let releasesURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios/releases")!
+
+    private static let apiURL = URL(string: "https://api.github.com/repos/EPXiaohua/heartfloat-ios/releases/latest")!
+
+    struct ReleaseInfo {
+        let version: String   // 标签去掉 v 前缀后的版本号
+        let notes: String     // 发布说明
+        let htmlURL: URL?
+    }
+
+    @Published var latestRelease: ReleaseInfo?
+
+    /// 当前版本号（Info.plist 的 CFBundleShortVersionString）
+    static var currentVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "未知"
+    }
+
+    /// 启动时静默检查：只有发现新版本才回调；网络失败、已是最新都不打扰
+    func checkOnLaunch(newVersionFound: @escaping (ReleaseInfo) -> Void) {
+        fetch { release in
+            guard let release = release,
+                  Self.isNewer(release.version, than: Self.currentVersion) else { return }
+            newVersionFound(release)
+        }
+    }
+
+    /// 拉取最新 Release（失败回调 nil，不抛错）
+    func fetch(completion: ((ReleaseInfo?) -> Void)? = nil) {
+        var request = URLRequest(url: Self.apiURL)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            DispatchQueue.main.async {
+                guard let self = self,
+                      let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tag = json["tag_name"] as? String else {
+                    completion?(nil)
+                    return
+                }
+                let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+                let release = ReleaseInfo(
+                    version: version,
+                    notes: Self.cleanNotes(json["body"] as? String ?? ""),
+                    htmlURL: (json["html_url"] as? String).flatMap(URL.init(string:))
+                )
+                self.latestRelease = release
+                completion?(release)
+            }
+        }.resume()
+    }
+
+    /// 版本号比较（按 '.' 分段数值比较）：lhs 比 rhs 新返回 true
+    static func isNewer(_ lhs: String, than rhs: String) -> Bool {
+        let l = lhs.split(separator: ".").map { Int($0) ?? 0 }
+        let r = rhs.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(l.count, r.count) {
+            let lv = i < l.count ? l[i] : 0
+            let rv = i < r.count ? r[i] : 0
+            if lv != rv { return lv > rv }
+        }
+        return false
+    }
+
+    /// 轻量清理发布说明的 Markdown 标记，适合纯文本展示
+    static func cleanNotes(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .replacingOccurrences(of: "## ", with: "")
     }
 }

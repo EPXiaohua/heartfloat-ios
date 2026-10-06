@@ -119,7 +119,7 @@ struct MainView: View {
             // 顶部 Toast（自动保存等提示）
             VStack {
                 if let toastText = viewModel.toastText {
-                    ToastView(text: toastText)
+                    ToastView(text: toastText, iconName: viewModel.toastIcon, iconColor: viewModel.toastIconColor)
                 }
                 Spacer()
             }
@@ -936,13 +936,15 @@ struct AnchoredMenuOverlay: View {
 
 struct ToastView: View {
     let text: String
+    var iconName: String = "checkmark.circle.fill"
+    var iconColor: Color = .green
 
     @State private var appeared = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
+            Image(systemName: iconName)
+                .foregroundColor(iconColor)
             Text(text)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.primary)

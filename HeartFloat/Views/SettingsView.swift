@@ -1493,6 +1493,9 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
 // MARK: - 关于
 
 struct AboutView: View {
+    @EnvironmentObject var settings: SettingsManager
+    @ObservedObject private var updateChecker = UpdateChecker.shared
+
     private let repoURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios")!
     private let issuesURL = URL(string: "https://github.com/EPXiaohua/heartfloat-ios/issues")!
     private let androidURL = URL(string: "https://github.com/EPXiaohua/heartfloat-android")!
@@ -1559,6 +1562,46 @@ struct AboutView: View {
                         }
                     }
 
+                    infoCard(title: "最新版本") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if let release = updateChecker.latestRelease {
+                                let hasNew = UpdateChecker.isNewer(release.version, than: Self.appVersion)
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(release.version)
+                                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                                        .foregroundColor(recordingThemeColor)
+                                    Spacer()
+                                    Text(hasNew ? "发现新版本" : "已是最新")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(hasNew ? recordingThemeColor : .secondary)
+                                }
+                                if !release.notes.isEmpty {
+                                    // 发布说明（预览前几行，完整内容见 Releases 页）
+                                    Text(release.notes)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                        .lineSpacing(3)
+                                        .lineLimit(12)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                Link(destination: release.htmlURL ?? UpdateChecker.releasesURL) {
+                                    Label("前往 Releases 页面下载", systemImage: "arrow.down.circle")
+                                        .font(.system(size: 13, weight: .medium))
+                                }
+                            } else {
+                                Text("暂时无法获取最新版本信息")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            Divider()
+
+                            Toggle("自动检查更新", isOn: $settings.checkUpdatesEnabled)
+                                .font(.system(size: 14))
+                        }
+                    }
+
                     infoCard(title: "项目信息") {
                         VStack(spacing: 10) {
                             HStack {
@@ -1588,6 +1631,10 @@ struct AboutView: View {
         }
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // 进入关于页时刷新一次最新版本信息（启动时已静默检查过）
+            updateChecker.fetch()
+        }
     }
 
     /// 版本号从打包配置读取（Info.plist 的 CFBundleShortVersionString），不写死
