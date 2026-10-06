@@ -30,7 +30,13 @@ class BleService: NSObject, ObservableObject {
     private var isManualStop = false
     private var isSkippingDevice = false
     /// 上次成功连接的设备（直连不依赖广播，避免断开后设备恢复广播慢导致扫不到）
-    private var lastConnectedIdentifier: UUID?
+    @Published var lastConnectedIdentifier: UUID?
+    /// 绑定设备的展示信息（蓝牙设备页用）
+    @Published var lastConnectedName: String = UserDefaults.standard.string(forKey: "lastConnectedBLEName") ?? ""
+    @Published var lastConnectedAt: Date? = {
+        let time = UserDefaults.standard.double(forKey: "lastConnectedBLEAt")
+        return time > 0 ? Date(timeIntervalSinceReferenceDate: time) : nil
+    }()
 
     private let heartRateServiceUUID = CBUUID(string: "180D")
     private let heartRateMeasurementUUID = CBUUID(string: "2A37")
@@ -156,6 +162,17 @@ class BleService: NSObject, ObservableObject {
         centralManager?.stopScan()
     }
 
+    /// 解绑上次连接的设备：清除本地记住的设备信息，下次连接恢复为扫描搜索
+    func unbindLastDevice() {
+        lastConnectedIdentifier = nil
+        lastConnectedName = ""
+        lastConnectedAt = nil
+        UserDefaults.standard.removeObject(forKey: "lastConnectedBLEPeripheral")
+        UserDefaults.standard.removeObject(forKey: "lastConnectedBLEName")
+        UserDefaults.standard.removeObject(forKey: "lastConnectedBLEAt")
+        addLog("已解绑设备，下次连接将重新搜索")
+    }
+
     func disconnect() {
         isManualStop = true
         scanTimeoutWork?.cancel()
@@ -265,6 +282,12 @@ extension BleService: CBCentralManagerDelegate {
         // 记住设备，下次连接直接直连（持久化，重启后依然有效）
         lastConnectedIdentifier = peripheral.identifier
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "lastConnectedBLEPeripheral")
+        if let name = peripheral.name, !name.isEmpty {
+            lastConnectedName = name
+            UserDefaults.standard.set(name, forKey: "lastConnectedBLEName")
+        }
+        lastConnectedAt = Date()
+        UserDefaults.standard.set(Date().timeIntervalSinceReferenceDate, forKey: "lastConnectedBLEAt")
 
         // 识别超时保护：服务/特征发现迟迟不完成则放弃该设备
         gattTimeoutWork?.cancel()

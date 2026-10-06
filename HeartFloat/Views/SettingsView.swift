@@ -21,6 +21,9 @@ struct SettingsView: View {
                     NavigationLink(destination: RecordingsListView()) {
                         Label("心率记录", systemImage: "waveform.path.ecg")
                     }
+                    NavigationLink(destination: BleDeviceSettingsView()) {
+                        Label("蓝牙设备", systemImage: "antenna.radiowaves.left.and.right")
+                    }
                     NavigationLink(destination: HttpPushSettingsView()) {
                         Label("联网推送", systemImage: "dot.radiowaves.up.forward")
                     }
@@ -642,6 +645,119 @@ struct LandscapeChartView: View {
     private static func timeText(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - 蓝牙设备（绑定详情 + 解绑）
+
+struct BleDeviceSettingsView: View {
+    @EnvironmentObject var viewModel: HeartRateViewModel
+    @ObservedObject private var ble = BleService.shared
+
+    @State private var showUnbindConfirm = false
+
+    private var isBound: Bool { ble.lastConnectedIdentifier != nil }
+
+    var body: some View {
+        ZStack {
+            List {
+                Section {
+                    if isBound {
+                        HStack(spacing: 14) {
+                            Image(systemName: "heart.circle.fill")
+                                .font(.system(size: 34))
+                                .foregroundColor(Color(hex: "EC746F"))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(ble.lastConnectedName.isEmpty ? "未知设备" : ble.lastConnectedName)
+                                    .font(.system(size: 15, weight: .medium))
+                                Text("标识 \(ble.lastConnectedIdentifier!.uuidString.prefix(8).uppercased())")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 4) {
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(viewModel.connectionState == .connected ? Color.green : Color(.systemGray3))
+                                        .frame(width: 7, height: 7)
+                                    Text(viewModel.connectionState == .connected ? "已连接" : "未连接")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                                if let at = ble.lastConnectedAt {
+                                    Text("最后连接 \(Self.dateText(at))")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(Color(.tertiaryLabel))
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                                .font(.system(size: 36))
+                                .foregroundColor(Color(.tertiaryLabel))
+                            Text("尚未绑定设备")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("连接一次手环后，这里会显示设备信息")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                    }
+                } header: {
+                    Text("绑定设备")
+                } footer: {
+                    Text("绑定后，连接时会优先直连该设备（不依赖设备广播），速度更快；解绑后恢复为扫描搜索附近的设备。")
+                }
+
+                Section {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showUnbindConfirm = true
+                    }) {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "link.badge.plus")
+                            Text("解绑设备")
+                            Spacer()
+                        }
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.red)
+                    }
+                    .disabled(!isBound)
+                }
+            }
+            .listStyle(.insetGrouped)
+
+            if showUnbindConfirm {
+                GlassAlertOverlay(
+                    iconName: "link.badge.plus",
+                    iconColor: .red,
+                    title: "解绑设备？",
+                    message: "解绑「\(ble.lastConnectedName.isEmpty ? "未知设备" : ble.lastConnectedName)」后，下次连接将重新搜索附近的心率设备",
+                    confirmTitle: "解绑",
+                    confirmDestructive: true,
+                    onConfirm: {
+                        ble.unbindLastDevice()
+                        showUnbindConfirm = false
+                    },
+                    onCancel: { showUnbindConfirm = false }
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showUnbindConfirm)
+        .navigationTitle("蓝牙设备")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private static func dateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
         return formatter.string(from: date)
     }
 }
