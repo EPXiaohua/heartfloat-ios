@@ -255,6 +255,12 @@ class HeartRateViewModel: NSObject, ObservableObject {
         pendingUnsavedRecording = nil
     }
 
+    /// 批量删除记录
+    func deleteRecordings(withIDs ids: Set<UUID>) {
+        HeartRateRecordingStore.delete(ids)
+        recordings = HeartRateRecordingStore.loadAll()
+    }
+
     func deleteRecording(_ recording: HeartRateRecording) {
         HeartRateRecordingStore.delete(recording)
         recordings = HeartRateRecordingStore.loadAll()
@@ -750,6 +756,13 @@ enum HeartRateRecordingStore {
     static func delete(_ recording: HeartRateRecording) {
         let url = directory.appendingPathComponent("\(recording.id.uuidString).json")
         try? FileManager.default.removeItem(at: url)
+    }
+
+    /// 批量删除（按 id 删除对应文件）
+    static func delete(_ ids: Set<UUID>) {
+        for id in ids {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(id.uuidString).json"))
+        }
     }
 
     /// 未保存会话快照（应用异常退出后的恢复依据），与正式记录同目录，不会被清理缓存误删

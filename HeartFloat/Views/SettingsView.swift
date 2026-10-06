@@ -936,6 +936,12 @@ struct RecordingsListView: View {
     @State private var showImporter = false
     @State private var pendingDelete: HeartRateRecording?
     @State private var importResult: ImportResult?
+    // 批量删除（编辑模式多选）
+    @State private var editMode: EditMode = .inactive
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var showBatchDeleteConfirm = false
+
+    private var isSelecting: Bool { editMode == .active }
 
     struct ImportResult: Identifiable {
         let id = UUID()
@@ -953,13 +959,13 @@ struct RecordingsListView: View {
 
     var body: some View {
         ZStack {
-            List {
+            List(selection: $selectedIDs) {
                 if !importedRecordings.isEmpty {
                     Section("导入的记录") {
                         ForEach(importedRecordings) { recording in
                             row(recording)
                         }
-                        .onDelete { requestDelete(offsets: $0, in: importedRecordings) }
+                        .onDelete(perform: isSelecting ? nil : { requestDelete(offsets: $0, in: importedRecordings) })
                     }
                 }
 
@@ -972,10 +978,16 @@ struct RecordingsListView: View {
                     ForEach(myRecordings) { recording in
                         row(recording)
                     }
-                    .onDelete { requestDelete(offsets: $0, in: myRecordings) }
+                    .onDelete(perform: isSelecting ? nil : { requestDelete(offsets: $0, in: myRecordings) })
                 }
             }
             .listStyle(.insetGrouped)
+            .environment(\.editMode, $editMode)
+            .safeAreaInset(edge: .bottom) {
+                if isSelecting {
+                    batchBar
+                }
+            }
 
             // 删除确认（防误删）
             if let pending = pendingDelete {
@@ -991,6 +1003,29 @@ struct RecordingsListView: View {
                         pendingDelete = nil
                     },
                     onCancel: { pendingDelete = nil }
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
+
+            // 批量删除确认（防误删）
+            if showBatchDeleteConfirm {
+                GlassAlertOverlay(
+                    iconName: "trash",
+                    iconColor: .red,
+                    title: "删除 \(selectedIDs.count) 条记录？",
+                    message: "删除后无法恢复",
+                    confirmTitle: "删除",
+                    confirmDestructive: true,
+                    onConfirm: {
+                        viewModel.deleteRecordings(withIDs: selectedIDs)
+                        selectedIDs = []
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            editMode = .inactive
+                        }
+                        showBatchDeleteConfirm = false
+                    },
+                    onCancel: { showBatchDeleteConfirm = false }
                 )
                 .transition(.opacity)
                 .zIndex(10)
@@ -1013,15 +1048,23 @@ struct RecordingsListView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: pendingDelete?.id)
         .animation(.easeInOut(duration: 0.2), value: importResult?.id)
+        .animation(.easeInOut(duration: 0.25), value: isSelecting)
+        .animation(.easeInOut(duration: 0.2), value: showBatchDeleteConfirm)
+        .animation(.easeInOut(duration: 0.15), value: selectedIDs)
         .navigationTitle("心率记录")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    showImporter = true
-                }) {
-                    Image(systemName: "square.and.arrow.down")
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if !isSelecting {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showImporter = true
+                    }) {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                }
+                Button(action: toggleSelection) {
+                    Text(isSelecting ? "完成" : "选择")
                 }
             }
         }
@@ -1054,6 +1097,62 @@ struct RecordingsListView: View {
     private func requestDelete(offsets: IndexSet, in list: [HeartRateRecording]) {
         guard let index = offsets.first, list.indices.contains(index) else { return }
         pendingDelete = list[index]
+    }
+
+    // MARK: 批量删除
+
+    private var allSelected: Bool {
+        !viewModel.recordings.isEmpty && selectedIDs.count == viewModel.recordings.count
+    }
+
+    private func toggleSelection() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            editMode = editMode == .active ? .inactive : .active
+        }
+        if !isSelecting {
+            selectedIDs = []
+        }
+    }
+
+    private func toggleSelectAll() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.15)) {
+            selectedIDs = allSelected ? [] : Set(viewModel.recordings.map(\.id))
+        }
+    }
+
+    private var batchBar: some View {
+        HStack(spacing: 12) {
+            Button(action: toggleSelectAll) {
+                Text(allSelected ? "取消全选" : "全选")
+                    .font(.system(size: 14))
+            }
+            .disabled(viewModel.recordings.isEmpty)
+
+            Spacer()
+
+            Text("已选 \(selectedIDs.count) 条")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+
+            Button(action: { showBatchDeleteConfirm = true }) {
+                Label("删除", systemImage: "trash")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(selectedIDs.isEmpty ? Color(.systemGray4) : Color.red, in: Capsule())
+            }
+            .disabled(selectedIDs.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private func row(_ recording: HeartRateRecording) -> some View {
