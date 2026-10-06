@@ -1493,7 +1493,7 @@ struct StorageManageView: View {
                 } header: {
                     Text("数据占用")
                 } footer: {
-                    Text("应用占用包含 App 本体与全部数据；其中临时缓存包含画中画载体视频、导出临时文件等可再生数据，清理后不影响心率记录。心率记录可在设置一级页面查看与管理。")
+                    Text("应用占用包含 App 本体与全部数据；其中临时缓存包含画中画载体视频、导出临时文件及系统缓存目录等可再生数据，清理后不影响心率记录。心率记录可在设置一级页面查看与管理。")
                 }
 
                 Section {
@@ -1584,7 +1584,7 @@ struct StorageManageView: View {
 
     private func refresh() {
         recordingsSize = CacheCleaner.directorySize(HeartRateRecordingStore.directory)
-        cacheSize = CacheCleaner.directorySize(FileManager.default.temporaryDirectory)
+        cacheSize = CacheCleaner.calculateCacheSize()
         appSize = CacheCleaner.appTotalSize()
         if let values = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey]
@@ -1609,15 +1609,27 @@ struct StorageManageView: View {
 // MARK: - 缓存计算与清理（临时目录均为可再生数据：载体视频、导出的临时文件等）
 
 private enum CacheCleaner {
+    /// 可清理的缓存目录：临时目录 + Library/Caches（标准缓存目录）
+    /// 注意不能清整个 Library——Preferences 里是 UserDefaults 设置数据
+    static var cacheDirectories: [URL] {
+        let fm = FileManager.default
+        var dirs = [fm.temporaryDirectory]
+        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            dirs.append(caches)
+        }
+        return dirs
+    }
+
     static func calculateCacheSize() -> Int64 {
-        directorySize(FileManager.default.temporaryDirectory)
+        cacheDirectories.reduce(0) { $0 + directorySize($1) }
     }
 
     static func clearCache() {
-        let tmp = FileManager.default.temporaryDirectory
-        let contents = (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
-        for url in contents {
-            try? FileManager.default.removeItem(at: url)
+        for dir in cacheDirectories {
+            let contents = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            for url in contents {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
     }
 
