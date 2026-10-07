@@ -119,12 +119,13 @@ struct MainView: View {
                 }
                 .zIndex(12)
             }
-            // 顶部 Toast（自动保存等提示）
+            // 底部 Toast（自动保存等提示）
             VStack {
+                Spacer()
                 if let toastText = viewModel.toastText {
                     ToastView(text: toastText, iconName: viewModel.toastIcon, iconColor: viewModel.toastIconColor)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                Spacer()
             }
             .zIndex(30)
         }

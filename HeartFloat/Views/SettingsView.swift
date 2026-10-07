@@ -362,13 +362,14 @@ struct PushServiceSettingsView: View {
         } message: {
             Text(portAlertMessage)
         }
-        // 顶部 Toast（复制成功提示，复用全局毛玻璃样式）
-        .overlay(alignment: .top) {
+        // 底部 Toast（复制成功提示，复用全局毛玻璃样式）
+        .overlay(alignment: .bottom) {
             VStack {
+                Spacer()
                 if let toast = toastText {
                     ToastView(text: toast)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                Spacer()
             }
             .animation(.easeInOut(duration: 0.2), value: toastText)
             .allowsHitTesting(false)
