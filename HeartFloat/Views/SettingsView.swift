@@ -626,14 +626,18 @@ struct LandscapeChartView: View {
     @State private var magnifyStartSpan: TimeInterval?
     @State private var magnifyCenter: Date?
 
-    // 底部缩略裁剪条状态
-    @State private var stripMode: StripDragMode = .none
-    @State private var stripStartX: CGFloat = 0
-    @State private var stripStartViewStartDate: Date?
-    @State private var stripStartViewEndDate: Date?
-    @State private var stripStartPanViewStart: Date?
+    // 底部缩略裁剪条状态：按触摸 id 管理会话，支持双指同时拖动两个把手
+    @State private var touchSessions: [Int: StripSession] = [:]
 
-    private enum StripDragMode { case none, leftHandle, rightHandle, pan }
+    private enum StripDragMode { case leftHandle, rightHandle, pan }
+
+    struct StripSession {
+        var mode: StripDragMode
+        var startX: CGFloat
+        var startViewStartDate: Date?
+        var startViewEndDate: Date?
+        var startPanViewStart: Date?
+    }
 
     /// 锁定模式：视口固定，图表上滑动即可连续查询（未缩放时默认开启）
     @State private var lockMode = false
@@ -848,17 +852,18 @@ struct LandscapeChartView: View {
                     themeColor: recordingThemeColor
                 )
 
-                handle(isActive: stripMode == .leftHandle)
+                handle(isActive: touchSessions.values.contains { $0.mode == .leftHandle })
                     .position(x: leftX, y: geo.size.height / 2)
 
-                handle(isActive: stripMode == .rightHandle)
+                handle(isActive: touchSessions.values.contains { $0.mode == .rightHandle })
                     .position(x: rightX, y: geo.size.height / 2)
             }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { handleStripDragChanged($0, trackWidth: trackWidth, inset: inset) }
-                    .onEnded { _ in stripMode = .none }
+            .overlay(
+                StripTouchView(
+                    onBegan: { handleTouchesBegan($0, trackWidth: trackWidth, inset: inset) },
+                    onMoved: { handleTouchesMoved($0, trackWidth: trackWidth, inset: inset) },
+                    onEnded: { handleTouchesEnded($0) }
+                )
             )
         }
         .frame(height: 46)
@@ -878,57 +883,67 @@ struct LandscapeChartView: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isActive)
     }
 
-    private func handleStripDragChanged(_ value: DragGesture.Value, trackWidth: CGFloat, inset: CGFloat) {
-        let x = value.location.x
-        let startFraction = totalSpan > 0 ? currentStart.timeIntervalSince(firstDate) / totalSpan : 0
-        let endFraction = totalSpan > 0 ? viewEndDate.timeIntervalSince(firstDate) / totalSpan : 1
-        let leftX = inset + CGFloat(startFraction) * trackWidth
-        let rightX = inset + CGFloat(endFraction) * trackWidth
-        let secondsPerPoint = totalSpan / max(trackWidth, 1)
+    private func handleTouchesBegan(_ touches: [StripTouch], trackWidth: CGFloat, inset: CGFloat) {
+        for touch in touches {
+            let x = touch.location.x
+            let startFraction = totalSpan > 0 ? currentStart.timeIntervalSince(firstDate) / totalSpan : 0
+            let endFraction = totalSpan > 0 ? viewEndDate.timeIntervalSince(firstDate) / totalSpan : 1
+            let leftX = inset + CGFloat(startFraction) * trackWidth
+            let rightX = inset + CGFloat(endFraction) * trackWidth
 
-        // 首次移动时判定拖动模式：左把手 / 右把手 / 中间平移
-        if stripMode == .none {
             let grab: CGFloat = 16
+            let mode: StripDragMode
             if abs(x - leftX) <= grab {
-                stripMode = .leftHandle
-                stripStartViewStartDate = currentStart
-                stripStartViewEndDate = viewEndDate
-                stripStartX = x
+                mode = .leftHandle
             } else if abs(x - rightX) <= grab {
-                stripMode = .rightHandle
-                stripStartViewStartDate = currentStart
-                stripStartViewEndDate = viewEndDate
-                stripStartX = x
+                mode = .rightHandle
+            } else if !touchSessions.values.contains(where: { $0.mode == .pan }) {
+                mode = .pan
             } else {
-                stripMode = .pan
-                stripStartPanViewStart = currentStart
-                stripStartX = x
+                continue // 同时只允许一个平移触摸
             }
-            return
+
+            touchSessions[touch.id] = StripSession(
+                mode: mode,
+                startX: x,
+                startViewStartDate: currentStart,
+                startViewEndDate: viewEndDate,
+                startPanViewStart: currentStart
+            )
         }
+    }
 
-        let shiftSeconds = TimeInterval(x - stripStartX) * secondsPerPoint
+    private func handleTouchesMoved(_ touches: [StripTouch], trackWidth: CGFloat, inset: CGFloat) {
+        let secondsPerPoint = totalSpan / max(trackWidth, 1)
+        for touch in touches {
+            guard let session = touchSessions[touch.id] else { continue }
+            let shiftSeconds = TimeInterval(touch.location.x - session.startX) * secondsPerPoint
 
-        switch stripMode {
-        case .leftHandle:
-            // 拖左把手：右端固定，起点移动（视口不小于 minSpan）
-            guard let s0 = stripStartViewStartDate, let e0 = stripStartViewEndDate else { return }
-            let newStart = min(max(s0.addingTimeInterval(shiftSeconds), firstDate), e0.addingTimeInterval(-minSpan))
-            viewStartDate = newStart
-            viewSpanSeconds = e0.timeIntervalSince(newStart)
-            lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
-        case .rightHandle:
-            // 拖右把手：起点固定，终点移动
-            guard let s0 = stripStartViewStartDate, let e0 = stripStartViewEndDate else { return }
-            let newEnd = min(max(e0.addingTimeInterval(shiftSeconds), s0.addingTimeInterval(minSpan)), firstDate.addingTimeInterval(totalSpan))
-            viewSpanSeconds = newEnd.timeIntervalSince(s0)
-            viewStartDate = s0
-            lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
-        case .pan:
-            let base = stripStartPanViewStart ?? currentStart
-            viewStartDate = clampStart(base.addingTimeInterval(shiftSeconds), span: currentSpan)
-        case .none:
-            break
+            switch session.mode {
+            case .leftHandle:
+                // 拖左把手：右端固定，起点移动（视口不小于 minSpan）
+                guard let s0 = session.startViewStartDate, let e0 = session.startViewEndDate else { continue }
+                let newStart = min(max(s0.addingTimeInterval(shiftSeconds), firstDate), e0.addingTimeInterval(-minSpan))
+                viewStartDate = newStart
+                viewSpanSeconds = e0.timeIntervalSince(newStart)
+                lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
+            case .rightHandle:
+                // 拖右把手：起点固定，终点移动
+                guard let s0 = session.startViewStartDate, let e0 = session.startViewEndDate else { continue }
+                let newEnd = min(max(e0.addingTimeInterval(shiftSeconds), s0.addingTimeInterval(minSpan)), firstDate.addingTimeInterval(totalSpan))
+                viewSpanSeconds = newEnd.timeIntervalSince(s0)
+                viewStartDate = s0
+                lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
+            case .pan:
+                let base = session.startPanViewStart ?? currentStart
+                viewStartDate = clampStart(base.addingTimeInterval(shiftSeconds), span: currentSpan)
+            }
+        }
+    }
+
+    private func handleTouchesEnded(_ ids: [Int]) {
+        for id in ids {
+            touchSessions.removeValue(forKey: id)
         }
     }
 
@@ -996,6 +1011,55 @@ private struct ThumbCurve: View {
             context.stroke(path, with: .color(themeColor), style: style)
         }
     }
+}
+
+/// 底部裁剪条的多点触摸桥接：SwiftUI 的 DragGesture 无法同时跟踪两个触点
+private struct StripTouchView: UIViewRepresentable {
+    var onBegan: ([StripTouch]) -> Void
+    var onMoved: ([StripTouch]) -> Void
+    var onEnded: ([Int]) -> Void
+
+    func makeUIView(context: Context) -> StripTouchUIView {
+        let view = StripTouchUIView()
+        view.isMultipleTouchEnabled = true
+        view.onBegan = onBegan
+        view.onMoved = onMoved
+        view.onEnded = onEnded
+        return view
+    }
+
+    func updateUIView(_ uiView: StripTouchUIView, context: Context) {
+        uiView.onBegan = onBegan
+        uiView.onMoved = onMoved
+        uiView.onEnded = onEnded
+    }
+}
+
+final class StripTouchUIView: UIView {
+    var onBegan: ([StripTouch]) -> Void = { _ in }
+    var onMoved: ([StripTouch]) -> Void = { _ in }
+    var onEnded: ([Int]) -> Void = { _ in }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onBegan(touches.map { StripTouch(id: $0.hash, location: $0.location(in: self)) })
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onMoved(touches.map { StripTouch(id: $0.hash, location: $0.location(in: self)) })
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onEnded(touches.map { $0.hash })
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onEnded(touches.map { $0.hash })
+    }
+}
+
+struct StripTouch {
+    let id: Int
+    let location: CGPoint
 }
 
 // MARK: - 蓝牙设备（绑定详情 + 解绑）
