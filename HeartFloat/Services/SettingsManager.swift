@@ -21,8 +21,6 @@ class SettingsManager: ObservableObject {
     @AppStorage("appearanceMode") var appearanceMode: Int = 0 {
         didSet { applyAppearanceOverride() }
     }
-    /// 断线自动重连：异常断连时自动尝试重连（手动断开不触发）
-    @AppStorage("autoReconnect") var autoReconnect: Bool = false
     /// 触感反馈开关（长按菜单、选择、复制等处的震动）
     @AppStorage("hapticsEnabled") var hapticsEnabled: Bool = true
     /// 屏幕常亮

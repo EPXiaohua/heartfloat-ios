@@ -68,10 +68,6 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            Section(footer: Text("连接意外断开时自动尝试重连，最多 3 次（间隔 3/6/9 秒）；手动断开或取消连接不会触发。")) {
-                Toggle("断线自动重连", isOn: $settings.autoReconnect)
-            }
-
             Section(footer: Text("关闭后，长按菜单、选择模式、复制地址等操作不再震动。")) {
                 Toggle("触感反馈", isOn: $settings.hapticsEnabled)
             }
