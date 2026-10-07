@@ -19,10 +19,26 @@ class SettingsManager: ObservableObject {
     @AppStorage("checkUpdatesEnabled") var checkUpdatesEnabled: Bool = true
     /// 外观模式：0 跟随系统 1 浅色 2 深色
     @AppStorage("appearanceMode") var appearanceMode: Int = 0
+    /// 断线自动重连：异常断连时自动尝试重连（手动断开不触发）
+    @AppStorage("autoReconnect") var autoReconnect: Bool = false
+    /// 触感反馈开关（长按菜单、选择、复制等处的震动）
+    @AppStorage("hapticsEnabled") var hapticsEnabled: Bool = true
+    /// 屏幕常亮
+    @AppStorage("keepScreenOn") var keepScreenOn: Bool = false
 
     var bpmNumberColor: Color {
         get { Color(hex: bpmNumberColorHex) }
         set { bpmNumberColorHex = newValue.toHex() }
+    }
+
+    init() {
+        // 启动时恢复屏幕常亮设置
+        applyKeepScreenOn()
+    }
+
+    /// 应用屏幕常亮开关
+    func applyKeepScreenOn() {
+        UIApplication.shared.isIdleTimerDisabled = keepScreenOn
     }
 
     var bpmLabelColor: Color {
@@ -65,6 +81,20 @@ class SettingsManager: ObservableObject {
         bpmLabelColor = Color(red: 0.53, green: 0.81, blue: 0.92)
         bpmNumberSize = 38
         bpmLabelSize = 15
+    }
+}
+
+// MARK: - 触感反馈（受「通用 → 触感反馈」开关控制）
+
+enum Haptics {
+    static func light() {
+        guard SettingsManager.shared.hapticsEnabled else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    static func medium() {
+        guard SettingsManager.shared.hapticsEnabled else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 }
 

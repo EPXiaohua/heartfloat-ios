@@ -67,6 +67,21 @@ struct GeneralSettingsView: View {
                     Text("深色").tag(2)
                 }
             }
+
+            Section(footer: Text("连接意外断开时自动尝试重连，最多 3 次（间隔 3/6/9 秒）；手动断开或取消连接不会触发。")) {
+                Toggle("断线自动重连", isOn: $settings.autoReconnect)
+            }
+
+            Section(footer: Text("关闭后，长按菜单、选择模式、复制地址等操作不再震动。")) {
+                Toggle("触感反馈", isOn: $settings.hapticsEnabled)
+            }
+
+            Section(footer: Text("开启后屏幕不会自动熄灭，适合把心率挂在屏幕上查看；会更耗电。")) {
+                Toggle("屏幕常亮", isOn: $settings.keepScreenOn)
+                    .onChange(of: settings.keepScreenOn) { _ in
+                        settings.applyKeepScreenOn()
+                    }
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("通用")
@@ -545,7 +560,7 @@ struct PushServiceSettingsView: View {
                     }
                     .onLongPressGesture(minimumDuration: 0.5) {
                         UIPasteboard.general.string = "\(scheme)://\(ip):\(port)"
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.light()
                         showToast("已复制")
                     }
                 }
@@ -580,7 +595,7 @@ struct PushServiceSettingsView: View {
                     }
                     .onLongPressGesture(minimumDuration: 0.5) {
                         UIPasteboard.general.string = url.absoluteString
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.light()
                         showToast("已复制")
                     }
             } else {
@@ -905,7 +920,7 @@ struct BleDeviceSettingsView: View {
 
                 Section {
                     Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.light()
                         showUnbindConfirm = true
                     }) {
                         HStack {
@@ -1078,7 +1093,7 @@ struct RecordingsListView: View {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 if !isSelecting {
                     Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.light()
                         showImporter = true
                     }) {
                         Image(systemName: "square.and.arrow.down")
@@ -1127,7 +1142,7 @@ struct RecordingsListView: View {
     }
 
     private func toggleSelection() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.light()
         withAnimation(.easeInOut(duration: 0.25)) {
             isSelecting.toggle()
         }
@@ -1137,7 +1152,7 @@ struct RecordingsListView: View {
     }
 
     private func toggleSelectAll() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.light()
         withAnimation(.easeInOut(duration: 0.15)) {
             selectedIDs = allSelected ? [] : Set(viewModel.recordings.map(\.id))
         }
@@ -1228,7 +1243,7 @@ struct RecordingsListView: View {
     }
 
     private func toggleSelect(_ recording: HeartRateRecording) {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.light()
         if selectedIDs.contains(recording.id) {
             selectedIDs.remove(recording.id)
         } else {
@@ -1279,7 +1294,7 @@ struct RecordingDetailView: View {
                         .cornerRadius(14)
                         .overlay(alignment: .topTrailing) {
                             Button(action: {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                Haptics.light()
                                 showLandscape = true
                             }) {
                                 Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -1342,7 +1357,7 @@ struct RecordingDetailView: View {
 
     private var exportMenu: some View {
         Button(action: {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Haptics.medium()
             showExportMenu = true
         }) {
             HStack {
@@ -2025,7 +2040,7 @@ struct StorageManageView: View {
 
                 Section {
                     Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.light()
                         if cacheSize > 0 {
                             showCleanConfirm = true
                         } else {

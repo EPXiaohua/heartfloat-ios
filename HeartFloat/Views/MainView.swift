@@ -318,12 +318,12 @@ struct MainView: View {
             if viewModel.isRecording {
                 showStopConfirm = true
             } else if viewModel.connectionState == .connected {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                Haptics.light()
                 viewModel.startRecording()
             }
         }
         .onLongPressGesture(minimumDuration: 0.5) {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Haptics.medium()
             showModeMenu = true
         }
         .background(
@@ -763,7 +763,7 @@ struct GlassAlertOverlay: View {
 
                 VStack(spacing: 10) {
                     Button(action: {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        Haptics.medium()
                         onConfirm()
                     }) {
                         Text(confirmTitle)
@@ -776,7 +776,7 @@ struct GlassAlertOverlay: View {
                     }
                     if let cancelTitle = cancelTitle {
                         Button(action: {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            Haptics.light()
                             onCancel?()
                         }) {
                             Text(cancelTitle)
@@ -860,7 +860,7 @@ struct AnchoredMenuCard: View {
 
     private func row(_ item: AnchoredMenuItem) -> some View {
         Button(action: {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Haptics.light()
             item.action()
             onClose()
         }) {
