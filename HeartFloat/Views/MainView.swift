@@ -3,6 +3,7 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject var viewModel: HeartRateViewModel
     @EnvironmentObject var settings: SettingsManager
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var showSettings = false
     @State private var blink = false
@@ -15,9 +16,11 @@ struct MainView: View {
 
     var body: some View {
         ZStack {
-            // 渐变背景
+            // 渐变背景（深色模式用暗红调）
             LinearGradient(
-                colors: [Color(red: 1.0, green: 0.96, blue: 0.96), Color(white: 0.98)],
+                colors: colorScheme == .dark
+                    ? [Color(red: 0.13, green: 0.05, blue: 0.06), Color(white: 0.06)]
+                    : [Color(red: 1.0, green: 0.96, blue: 0.96), Color(white: 0.98)],
                 startPoint: .top, endPoint: .bottom
             )
             .ignoresSafeArea()
@@ -205,7 +208,7 @@ struct MainView: View {
                 .frame(height: 150)
         }
         .padding(14)
-        .background(Color.white.opacity(0.9))
+        .background(colorScheme == .dark ? Color(white: 0.11).opacity(0.95) : Color.white.opacity(0.9))
         .cornerRadius(18)
         .shadow(color: themeColor.opacity(0.10), radius: 10, y: 4)
     }

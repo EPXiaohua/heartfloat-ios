@@ -53,8 +53,6 @@
         <string>UIInterfaceOrientationPortrait</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
-    <key>UIUserInterfaceStyle</key>
-    <string>Light</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>心率悬浮窗需要访问本地网络以提供 HTTP / WebSocket 推送服务。</string>
     <key>NSBonjourServices</key>

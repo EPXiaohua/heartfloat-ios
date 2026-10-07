@@ -17,6 +17,8 @@ class SettingsManager: ObservableObject {
     @AppStorage("wsPushEnabled") var wsPushEnabled: Bool = false
     @AppStorage("wsPushPort") var wsPushPort: Int = 8081
     @AppStorage("checkUpdatesEnabled") var checkUpdatesEnabled: Bool = true
+    /// 外观模式：0 跟随系统 1 浅色 2 深色
+    @AppStorage("appearanceMode") var appearanceMode: Int = 0
 
     var bpmNumberColor: Color {
         get { Color(hex: bpmNumberColorHex) }

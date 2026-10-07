@@ -17,6 +17,9 @@ struct SettingsView: View {
         NavigationView {
             List {
                 Section {
+                    NavigationLink(destination: GeneralSettingsView()) {
+                        Label("通用", systemImage: "gearshape")
+                    }
                     NavigationLink(destination: PipSettingsView()) {
                         Label("悬浮窗设置", systemImage: "pip.enter")
                     }
@@ -47,6 +50,27 @@ struct SettingsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+}
+
+// MARK: - 通用设置
+
+struct GeneralSettingsView: View {
+    @EnvironmentObject var settings: SettingsManager
+
+    var body: some View {
+        List {
+            Section(footer: Text("「跟随系统」时应用配色随 iOS 深色模式自动切换。")) {
+                Picker("外观", selection: $settings.appearanceMode) {
+                    Text("跟随系统").tag(0)
+                    Text("浅色").tag(1)
+                    Text("深色").tag(2)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("通用")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

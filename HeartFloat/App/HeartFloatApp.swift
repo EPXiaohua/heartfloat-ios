@@ -13,6 +13,16 @@ struct HeartFloatApp: App {
                 .environmentObject(viewModel)
                 .environmentObject(settingsManager)
                 .tint(Color(hex: "EC746F"))
+                .preferredColorScheme(appearanceColorScheme)
+        }
+    }
+
+    /// 外观模式：0 跟随系统 1 浅色 2 深色
+    private var appearanceColorScheme: ColorScheme? {
+        switch settingsManager.appearanceMode {
+        case 1: return .light
+        case 2: return .dark
+        default: return nil
         }
     }
 }
