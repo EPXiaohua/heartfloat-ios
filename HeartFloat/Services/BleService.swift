@@ -383,8 +383,8 @@ extension BleService: CBPeripheralDelegate {
         if let characteristic = service.characteristics?.first(where: { $0.uuid == heartRateMeasurementUUID }) {
             addLog("已找到心率特征 (2A37)，开启通知...")
             heartRateCharacteristic = characteristic
+            // 只开通知即可：心率测量特征通常不允许读取（读会报 Reading is not permitted），数据由通知推送
             peripheral.setNotifyValue(true, for: characteristic)
-            peripheral.readValue(for: characteristic)
         } else {
             addLog("未发现心率特征，不是心率设备")
             abandonCurrentPeripheral()

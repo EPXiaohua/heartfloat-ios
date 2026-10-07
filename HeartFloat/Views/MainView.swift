@@ -611,7 +611,12 @@ struct ConnectionOverlayView: View {
         ZStack {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
-                .onTapGesture { } // 阻断点击穿透
+                .onTapGesture {
+                    // 连接成功后点击弹窗外可关闭（连接中不可关，失败走「关闭」按钮）
+                    if isConnected {
+                        viewModel.showConnectionOverlay = false
+                    }
+                }
 
             VStack(spacing: 14) {
                 statusIcon

@@ -626,6 +626,15 @@ struct LandscapeChartView: View {
     @State private var magnifyStartSpan: TimeInterval?
     @State private var magnifyCenter: Date?
 
+    // 底部缩略裁剪条状态
+    @State private var stripMode: StripDragMode = .none
+    @State private var stripStartX: CGFloat = 0
+    @State private var stripStartViewStartDate: Date?
+    @State private var stripStartViewEndDate: Date?
+    @State private var stripStartPanViewStart: Date?
+
+    private enum StripDragMode { case none, leftHandle, rightHandle, pan }
+
     /// 横向缩放时可见的最小时间窗口
     private let minSpan: TimeInterval = 30
 
@@ -654,9 +663,6 @@ struct LandscapeChartView: View {
         guard let last = recording.samples.last?.t else { return minSpan }
         return max(last.timeIntervalSince(firstDate), minSpan)
     }
-    private var maxZoom: Double {
-        max(1, totalSpan / minSpan)
-    }
     /// 当前视口宽度（秒）
     private var currentSpan: TimeInterval {
         min(viewSpanSeconds ?? totalSpan, totalSpan)
@@ -665,15 +671,9 @@ struct LandscapeChartView: View {
     private var currentStart: Date {
         clampStart(viewStartDate ?? firstDate, span: currentSpan)
     }
-    /// 当前缩放倍率（滑块显示用）
-    private var zoomValue: Double {
-        currentSpan > 0 ? totalSpan / currentSpan : 1
-    }
-    /// 当前视口偏移比例（滑块显示用）
-    private var offsetValue: Double {
-        let draggable = max(0, totalSpan - currentSpan)
-        guard draggable > 0 else { return 0 }
-        return currentStart.timeIntervalSince(firstDate) / draggable
+    /// 视口终点
+    private var viewEndDate: Date {
+        currentStart.addingTimeInterval(currentSpan)
     }
 
     var body: some View {
@@ -681,7 +681,7 @@ struct LandscapeChartView: View {
             backgroundColor
 
             VStack(spacing: 12) {
-                // 顶栏：关闭 + 采样点数 + 横向缩放（同一行，不再叠压提示文字）
+                // 顶栏：关闭 + 采样点数
                 HStack(spacing: 12) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark.circle.fill")
@@ -692,42 +692,12 @@ struct LandscapeChartView: View {
                     Text("共 \(recording.samples.count) 点")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(hintColor)
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12))
-                            .foregroundColor(hintColor)
-                        Slider(
-                            value: Binding(get: { zoomValue }, set: { setZoom($0) }),
-                            in: 1...maxZoom
-                        )
-                        .frame(width: 170)
-                        Text(String(format: "%.1fx", zoomValue))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(hintColor)
-                            .frame(width: 38)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
 
                 chartArea
 
-                // 底栏：视口位置滑块（拖动图表同样可以平移）
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.left.and.right")
-                        .font(.system(size: 12))
-                        .foregroundColor(hintColor)
-                    Slider(
-                        value: Binding(get: { offsetValue }, set: { setOffset($0) }),
-                        in: 0...1
-                    )
-                    .disabled(totalSpan - currentSpan < 1)
-                    Text("\(Int(offsetValue * 100))%")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(hintColor)
-                        .frame(width: 34)
-                }
+                // 底栏：图表缩略图 + 双把手裁剪窗口（控制视口两端）
+                thumbStrip
             }
             .padding()
         }
@@ -821,18 +791,103 @@ struct LandscapeChartView: View {
         viewStartDate = clampStart(magnifyCenter!.addingTimeInterval(-newSpan / 2), span: newSpan)
     }
 
-    /// 右上角滑块设定缩放倍率（保持视口中心稳定）
-    private func setZoom(_ newZoom: Double) {
-        let newSpan = clampSpan(totalSpan / max(newZoom, 0.0001))
-        let center = currentStart.addingTimeInterval(currentSpan / 2)
-        viewSpanSeconds = newSpan
-        viewStartDate = clampStart(center.addingTimeInterval(-newSpan / 2), span: newSpan)
+    // MARK: - 底部缩略裁剪条
+
+    private var thumbStrip: some View {
+        GeometryReader { geo in
+            let inset: CGFloat = 10
+            let trackWidth = max(geo.size.width - inset * 2, 10)
+            let startFraction = totalSpan > 0 ? currentStart.timeIntervalSince(firstDate) / totalSpan : 0
+            let endFraction = totalSpan > 0 ? viewEndDate.timeIntervalSince(firstDate) / totalSpan : 1
+            let leftX = inset + CGFloat(startFraction) * trackWidth
+            let rightX = inset + CGFloat(endFraction) * trackWidth
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color(.systemGray5))
+
+                ThumbCurve(
+                    samples: recording.samples,
+                    firstDate: firstDate,
+                    totalSpan: totalSpan,
+                    viewLeftX: leftX,
+                    viewRightX: rightX,
+                    plotInset: inset,
+                    themeColor: recordingThemeColor
+                )
+
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(recordingThemeColor)
+                    .frame(width: 8, height: geo.size.height * 0.84)
+                    .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                    .position(x: leftX, y: geo.size.height / 2)
+
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(recordingThemeColor)
+                    .frame(width: 8, height: geo.size.height * 0.84)
+                    .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                    .position(x: rightX, y: geo.size.height / 2)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { handleStripDragChanged($0, trackWidth: trackWidth, inset: inset) }
+                    .onEnded { _ in stripMode = .none }
+            )
+        }
+        .frame(height: 46)
     }
 
-    /// 底部滑块设定视口位置
-    private func setOffset(_ fraction: Double) {
-        let draggable = max(0, totalSpan - currentSpan)
-        viewStartDate = clampStart(firstDate.addingTimeInterval(fraction * draggable), span: currentSpan)
+    private func handleStripDragChanged(_ value: DragGesture.Value, trackWidth: CGFloat, inset: CGFloat) {
+        let x = value.location.x
+        let startFraction = totalSpan > 0 ? currentStart.timeIntervalSince(firstDate) / totalSpan : 0
+        let endFraction = totalSpan > 0 ? viewEndDate.timeIntervalSince(firstDate) / totalSpan : 1
+        let leftX = inset + CGFloat(startFraction) * trackWidth
+        let rightX = inset + CGFloat(endFraction) * trackWidth
+        let secondsPerPoint = totalSpan / max(trackWidth, 1)
+
+        // 首次移动时判定拖动模式：左把手 / 右把手 / 中间平移
+        if stripMode == .none {
+            let grab: CGFloat = 16
+            if abs(x - leftX) <= grab {
+                stripMode = .leftHandle
+                stripStartViewStartDate = currentStart
+                stripStartViewEndDate = viewEndDate
+                stripStartX = x
+            } else if abs(x - rightX) <= grab {
+                stripMode = .rightHandle
+                stripStartViewStartDate = currentStart
+                stripStartViewEndDate = viewEndDate
+                stripStartX = x
+            } else {
+                stripMode = .pan
+                stripStartPanViewStart = currentStart
+                stripStartX = x
+            }
+            return
+        }
+
+        let shiftSeconds = TimeInterval(x - stripStartX) * secondsPerPoint
+
+        switch stripMode {
+        case .leftHandle:
+            // 拖左把手：右端固定，起点移动（视口不小于 minSpan）
+            guard let s0 = stripStartViewStartDate, let e0 = stripStartViewEndDate else { return }
+            let newStart = min(max(s0.addingTimeInterval(shiftSeconds), firstDate), e0.addingTimeInterval(-minSpan))
+            viewStartDate = newStart
+            viewSpanSeconds = e0.timeIntervalSince(newStart)
+        case .rightHandle:
+            // 拖右把手：起点固定，终点移动
+            guard let s0 = stripStartViewStartDate, let e0 = stripStartViewEndDate else { return }
+            let newEnd = min(max(e0.addingTimeInterval(shiftSeconds), s0.addingTimeInterval(minSpan)), firstDate.addingTimeInterval(totalSpan))
+            viewSpanSeconds = newEnd.timeIntervalSince(s0)
+            viewStartDate = s0
+        case .pan:
+            let base = stripStartPanViewStart ?? currentStart
+            viewStartDate = clampStart(base.addingTimeInterval(shiftSeconds), span: currentSpan)
+        case .none:
+            break
+        }
     }
 
     private func clampSpan(_ span: TimeInterval) -> TimeInterval {
@@ -848,6 +903,56 @@ struct LandscapeChartView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
         return formatter.string(from: date)
+    }
+}
+
+/// 底部缩略曲线：全范围曲线，视口内正常对比度、视口外降低透明度
+private struct ThumbCurve: View {
+    let samples: [HeartRateRecording.Sample]
+    let firstDate: Date
+    let totalSpan: TimeInterval
+    let viewLeftX: CGFloat
+    let viewRightX: CGFloat
+    let plotInset: CGFloat
+    let themeColor: Color
+
+    var body: some View {
+        Canvas { context, size in
+            guard samples.count >= 2, totalSpan > 0 else { return }
+            let plot = CGRect(
+                x: plotInset,
+                y: 5,
+                width: max(size.width - plotInset * 2, 10),
+                height: max(size.height - 10, 10)
+            )
+            let values = samples.map { Double($0.bpm) }
+            let lo = values.min() ?? 60
+            let hi = max(values.max() ?? 100, lo + 1)
+
+            var path = Path()
+            var started = false
+            for s in samples {
+                let x = plot.minX + CGFloat(s.t.timeIntervalSince(firstDate) / totalSpan) * plot.width
+                let ratio = (Double(s.bpm) - lo) / (hi - lo)
+                let y = plot.maxY - CGFloat(ratio) * plot.height
+                if started {
+                    path.addLine(to: CGPoint(x: x, y: y))
+                } else {
+                    path.move(to: CGPoint(x: x, y: y))
+                    started = true
+                }
+            }
+
+            let style = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+
+            // 视口外：降低对比度
+            context.stroke(path, with: .color(themeColor.opacity(0.28)), style: style)
+
+            // 视口内：正常对比度
+            let viewRect = CGRect(x: viewLeftX, y: 0, width: max(viewRightX - viewLeftX, 1), height: size.height)
+            context.clip(to: Path(viewRect))
+            context.stroke(path, with: .color(themeColor), style: style)
+        }
     }
 }
 
@@ -1214,18 +1319,8 @@ struct RecordingsListView: View {
                     .foregroundColor(selected ? recordingThemeColor : Color(.systemGray3))
             }
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(Self.dateText(recording.startedAt))
-                        .font(.system(size: 15, weight: .medium))
-                    if recording.imported {
-                        Text("导入")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.blue, in: Capsule())
-                    }
-                }
+                Text(Self.dateText(recording.startedAt))
+                    .font(.system(size: 15, weight: .medium))
                 HStack(spacing: 14) {
                     Text("时长 \(recording.durationText)")
                     Text("平均 \(recording.averageBpm.map { String(format: "%.0f", $0) } ?? "--") BPM")
