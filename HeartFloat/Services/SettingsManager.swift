@@ -17,8 +17,10 @@ class SettingsManager: ObservableObject {
     @AppStorage("wsPushEnabled") var wsPushEnabled: Bool = false
     @AppStorage("wsPushPort") var wsPushPort: Int = 8081
     @AppStorage("checkUpdatesEnabled") var checkUpdatesEnabled: Bool = true
-    /// 外观模式：0 跟随系统 1 浅色 2 深色
-    @AppStorage("appearanceMode") var appearanceMode: Int = 0
+    /// 外观模式：0 跟随系统 1 浅色 2 深色（切换时立即应用到所有 window，含已呈现的 sheet）
+    @AppStorage("appearanceMode") var appearanceMode: Int = 0 {
+        didSet { applyAppearanceOverride() }
+    }
     /// 断线自动重连：异常断连时自动尝试重连（手动断开不触发）
     @AppStorage("autoReconnect") var autoReconnect: Bool = false
     /// 触感反馈开关（长按菜单、选择、复制等处的震动）
@@ -39,6 +41,23 @@ class SettingsManager: ObservableObject {
     /// 应用屏幕常亮开关
     func applyKeepScreenOn() {
         UIApplication.shared.isIdleTimerDisabled = keepScreenOn
+    }
+
+    /// 将外观模式应用到所有已连接的 window：preferredColorScheme 对已呈现的 sheet 不实时刷新，需在 UIKit 层覆盖
+    func applyAppearanceOverride() {
+        let style: UIUserInterfaceStyle
+        switch appearanceMode {
+        case 1: style = .light
+        case 2: style = .dark
+        default: style = .unspecified
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            if let windowScene = scene as? UIWindowScene {
+                for window in windowScene.windows {
+                    window.overrideUserInterfaceStyle = style
+                }
+            }
+        }
     }
 
     var bpmLabelColor: Color {
