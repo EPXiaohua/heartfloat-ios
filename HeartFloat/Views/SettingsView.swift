@@ -631,7 +631,7 @@ struct LandscapeChartView: View {
 
     private enum StripDragMode { case leftHandle, rightHandle, pan }
 
-    struct StripSession {
+    private struct StripSession {
         var mode: StripDragMode
         var startX: CGFloat
         var startViewStartDate: Date?
