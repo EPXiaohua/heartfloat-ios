@@ -635,6 +635,9 @@ struct LandscapeChartView: View {
 
     private enum StripDragMode { case none, leftHandle, rightHandle, pan }
 
+    /// 锁定模式：视口固定，图表上滑动即可连续查询（未缩放时默认开启）
+    @State private var lockMode = false
+
     /// 横向缩放时可见的最小时间窗口
     private let minSpan: TimeInterval = 30
 
@@ -689,6 +692,16 @@ struct LandscapeChartView: View {
                             .foregroundColor(recordingThemeColor)
                     }
                     Spacer()
+                    Button {
+                        Haptics.light()
+                        lockMode.toggle()
+                    } label: {
+                        Image(systemName: lockMode ? "lock.fill" : "lock.open.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(lockMode ? .white : hintColor)
+                            .padding(7)
+                            .background(lockMode ? recordingThemeColor : Color(.systemGray5).opacity(0.7), in: Circle())
+                    }
                     Text("共 \(recording.samples.count) 点")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(hintColor)
@@ -701,7 +714,13 @@ struct LandscapeChartView: View {
             }
             .padding()
         }
-        .onAppear { OrientationManager.shared.enterLandscape() }
+        .onAppear {
+            OrientationManager.shared.enterLandscape()
+            // 初始未缩放（视口即全范围）时平移无意义，默认开启锁定
+            if currentSpan >= totalSpan - 1 {
+                lockMode = true
+            }
+        }
         .onDisappear { OrientationManager.shared.exitLandscape() }
     }
 
@@ -720,7 +739,7 @@ struct LandscapeChartView: View {
             // 无查询时在图表顶部居中显示操作提示（与查询胶囊互斥）
             .overlay(alignment: .top) {
                 if queryIndex == nil {
-                    Text("单击查询 · 拖动平移 · 双指缩放")
+                    Text(lockMode ? "滑动查询 · 双指缩放" : "单击查询 · 双指缩放 · 拖动平移")
                         .font(.system(size: 12))
                         .foregroundColor(hintColor)
                         .padding(.top, 10)
@@ -742,8 +761,19 @@ struct LandscapeChartView: View {
         }
     }
 
-    /// 单指拖动：位移超过阈值进入平移模式，否则视为单击
+    /// 单指拖动：锁定时滑动连续查询；未锁定时位移超过阈值进入平移模式，否则视为单击
     private func handleDragChanged(_ value: DragGesture.Value, size: CGSize) {
+        if lockMode {
+            // 锁定：视口固定，滑动经过的采样点实时查询
+            let layout = RecordingChartLayout(
+                samples: recording.samples,
+                size: size,
+                viewStart: currentStart,
+                viewSpanSeconds: currentSpan
+            )
+            queryIndex = layout.nearestIndex(in: recording.samples, at: value.location)
+            return
+        }
         guard !magnifying else { return }
         if !dragActive {
             if abs(value.translation.width) > 10 || abs(value.translation.height) > 10 {
@@ -789,6 +819,8 @@ struct LandscapeChartView: View {
         let newSpan = clampSpan(magnifyStartSpan! / value)
         viewSpanSeconds = newSpan
         viewStartDate = clampStart(magnifyCenter!.addingTimeInterval(-newSpan / 2), span: newSpan)
+        // 视口回到全范围则平移无意义，自动锁定；一旦缩放即解锁
+        lockMode = newSpan >= totalSpan - 1
     }
 
     // MARK: - 底部缩略裁剪条
@@ -816,16 +848,10 @@ struct LandscapeChartView: View {
                     themeColor: recordingThemeColor
                 )
 
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(recordingThemeColor)
-                    .frame(width: 8, height: geo.size.height * 0.84)
-                    .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                handle(isActive: stripMode == .leftHandle)
                     .position(x: leftX, y: geo.size.height / 2)
 
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(recordingThemeColor)
-                    .frame(width: 8, height: geo.size.height * 0.84)
-                    .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                handle(isActive: stripMode == .rightHandle)
                     .position(x: rightX, y: geo.size.height / 2)
             }
             .contentShape(Rectangle())
@@ -836,6 +862,20 @@ struct LandscapeChartView: View {
             )
         }
         .frame(height: 46)
+    }
+
+    /// 裁剪条把手：拖动时曲线动效放大 + 高亮，松开弹回原样
+    private func handle(isActive: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 3)
+            .fill(recordingThemeColor)
+            .frame(width: 8, height: 38)
+            .overlay(
+                RoundedRectangle(cornerRadius: 3)
+                    .stroke(Color.white.opacity(isActive ? 0.9 : 0), lineWidth: 2)
+            )
+            .shadow(color: recordingThemeColor.opacity(isActive ? 0.55 : 0.18), radius: isActive ? 6 : 2, y: 1)
+            .scaleEffect(isActive ? 1.35 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isActive)
     }
 
     private func handleStripDragChanged(_ value: DragGesture.Value, trackWidth: CGFloat, inset: CGFloat) {
@@ -876,12 +916,14 @@ struct LandscapeChartView: View {
             let newStart = min(max(s0.addingTimeInterval(shiftSeconds), firstDate), e0.addingTimeInterval(-minSpan))
             viewStartDate = newStart
             viewSpanSeconds = e0.timeIntervalSince(newStart)
+            lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
         case .rightHandle:
             // 拖右把手：起点固定，终点移动
             guard let s0 = stripStartViewStartDate, let e0 = stripStartViewEndDate else { return }
             let newEnd = min(max(e0.addingTimeInterval(shiftSeconds), s0.addingTimeInterval(minSpan)), firstDate.addingTimeInterval(totalSpan))
             viewSpanSeconds = newEnd.timeIntervalSince(s0)
             viewStartDate = s0
+            lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
         case .pan:
             let base = stripStartPanViewStart ?? currentStart
             viewStartDate = clampStart(base.addingTimeInterval(shiftSeconds), span: currentSpan)
