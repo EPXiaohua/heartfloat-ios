@@ -155,7 +155,11 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
                 // 连接成功后展示勾动画片刻再自动关闭弹窗
                 if state == .connected {
+                    let didReconnect = reconnectAttempts > 0
                     self.cancelAutoReconnect()
+                    if didReconnect {
+                        self.showToast("重连成功")
+                    }
                     // Auto 模式：心率通知就绪即自动开始记录
                     if self.autoRecording && !self.isRecording {
                         self.startRecording()
@@ -213,15 +217,19 @@ class HeartRateViewModel: NSObject, ObservableObject {
     private func scheduleAutoReconnect() {
         guard reconnectAttempts < 3 else {
             addLog("自动重连已达最大次数（3 次），停止重连")
+            showToast("自动重连失败，请手动连接", icon: "exclamationmark.triangle.fill", iconColor: .orange)
             reconnectAttempts = 0
             return
         }
         reconnectAttempts += 1
         let delay = 3.0 * Double(reconnectAttempts)
         addLog("连接断开，\(Int(delay)) 秒后自动重连（第 \(reconnectAttempts)/3 次）")
+        showToast("连接已断开，\(Int(delay)) 秒后自动重连", icon: "arrow.clockwise.circle.fill", iconColor: .orange)
         reconnectWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
+            addLog("正在自动重连（第 \(self.reconnectAttempts)/3 次）")
+            self.showToast("正在自动重连（第 \(self.reconnectAttempts)/3 次）...", icon: "arrow.clockwise", iconColor: .orange)
             self.bleService.startScan()
         }
         reconnectWorkItem = item
