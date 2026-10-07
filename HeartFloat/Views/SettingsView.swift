@@ -892,15 +892,21 @@ struct LandscapeChartView: View {
             let rightX = inset + CGFloat(endFraction) * trackWidth
 
             let grab: CGFloat = 16
+            let hasLeft = touchSessions.values.contains { $0.mode == .leftHandle }
+            let hasRight = touchSessions.values.contains { $0.mode == .rightHandle }
+
             let mode: StripDragMode
-            if abs(x - leftX) <= grab {
+            if abs(x - leftX) <= grab && !hasLeft {
                 mode = .leftHandle
-            } else if abs(x - rightX) <= grab {
+                // 把手会话优先：踢掉正在进行的平移
+                touchSessions = touchSessions.filter { $0.value.mode != .pan }
+            } else if abs(x - rightX) <= grab && !hasRight {
                 mode = .rightHandle
-            } else if !touchSessions.values.contains(where: { $0.mode == .pan }) {
+                touchSessions = touchSessions.filter { $0.value.mode != .pan }
+            } else if touchSessions.isEmpty {
                 mode = .pan
             } else {
-                continue // 同时只允许一个平移触摸
+                continue // 已有会话活动时不新增平移
             }
 
             touchSessions[touch.id] = StripSession(
@@ -915,29 +921,41 @@ struct LandscapeChartView: View {
 
     private func handleTouchesMoved(_ touches: [StripTouch], trackWidth: CGFloat, inset: CGFloat) {
         let secondsPerPoint = totalSpan / max(trackWidth, 1)
+
+        // 先收集本批次所有把手意图，合并成一次视口更新（避免两个会话互相覆盖）
+        var newStart: Date?
+        var newEnd: Date?
+        var panBase: Date?
+        var panShift: TimeInterval = 0
+
         for touch in touches {
             guard let session = touchSessions[touch.id] else { continue }
             let shiftSeconds = TimeInterval(touch.location.x - session.startX) * secondsPerPoint
 
             switch session.mode {
             case .leftHandle:
-                // 拖左把手：右端固定，起点移动（视口不小于 minSpan）
                 guard let s0 = session.startViewStartDate, let e0 = session.startViewEndDate else { continue }
-                let newStart = min(max(s0.addingTimeInterval(shiftSeconds), firstDate), e0.addingTimeInterval(-minSpan))
-                viewStartDate = newStart
-                viewSpanSeconds = e0.timeIntervalSince(newStart)
-                lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
+                newStart = min(max(s0.addingTimeInterval(shiftSeconds), firstDate), e0.addingTimeInterval(-minSpan))
+                newEnd = e0
             case .rightHandle:
-                // 拖右把手：起点固定，终点移动
                 guard let s0 = session.startViewStartDate, let e0 = session.startViewEndDate else { continue }
-                let newEnd = min(max(e0.addingTimeInterval(shiftSeconds), s0.addingTimeInterval(minSpan)), firstDate.addingTimeInterval(totalSpan))
-                viewSpanSeconds = newEnd.timeIntervalSince(s0)
-                viewStartDate = s0
-                lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
+                newEnd = min(max(e0.addingTimeInterval(shiftSeconds), s0.addingTimeInterval(minSpan)), firstDate.addingTimeInterval(totalSpan))
+                newStart = s0
             case .pan:
-                let base = session.startPanViewStart ?? currentStart
-                viewStartDate = clampStart(base.addingTimeInterval(shiftSeconds), span: currentSpan)
+                panBase = session.startPanViewStart
+                panShift = shiftSeconds
             }
+        }
+
+        if newStart != nil || newEnd != nil {
+            // 把手意图合并：左把手定起点、右把手定终点，交叉时钳制最小视口
+            let start = newStart ?? currentStart
+            let end = max(newEnd ?? viewEndDate, start.addingTimeInterval(minSpan))
+            viewStartDate = start
+            viewSpanSeconds = end.timeIntervalSince(start)
+            lockMode = (viewSpanSeconds ?? 0) >= totalSpan - 1
+        } else if let panBase = panBase {
+            viewStartDate = clampStart(panBase.addingTimeInterval(panShift), span: currentSpan)
         }
     }
 
