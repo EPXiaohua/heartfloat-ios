@@ -8,6 +8,14 @@
 
 > 主要在小米手环 9 Pro 上测试。其他设备如遇连接或数据问题，欢迎到 [Issues](https://github.com/EPXiaohua/heartfloat-ios/issues) 反馈。
 
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshots/main-light.png" width="280" alt="浅色模式"/>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/screenshots/main-dark.png" width="280" alt="深色模式"/>
+</p>
+
 ## 功能特性
 
 - 🔵 **BLE 蓝牙连接** —— 连接小米手环等标准心率设备（180D / 2A37），直连优先、连接验证、断连检测、15 秒数据看门狗
