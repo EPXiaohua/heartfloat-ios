@@ -6,6 +6,20 @@ import UniformTypeIdentifiers
 // 记录图表主题色（与主界面曲线一致）
 private let recordingThemeColor = Color(red: 1.0, green: 0.42, blue: 0.42)
 
+// MARK: - 设置页卡片底色（深色模式提亮卡片，拉开与纯黑背景的层次）
+
+private struct SettingsCardBackground: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content.background(colorScheme == .dark ? Color(white: 0.14) : Color(.systemGray6))
+    }
+}
+
+extension View {
+    func settingsCardBackground() -> some View { modifier(SettingsCardBackground()) }
+}
+
 // MARK: - 设置主页（分组路径）
 
 struct SettingsView: View {
@@ -151,7 +165,7 @@ struct PipSettingsView: View {
                                 .foregroundColor(settings.bpmLabelColor)
                         }
                         Text("88")
-                            .font(.system(size: min(settings.bpmNumberSize, 32), weight: .bold))
+                            .font(.system(size: min(settings.bpmNumberSize, 32), weight: .bold, design: .rounded))
                             .foregroundColor(settings.bpmNumberColor)
                         if settings.bpmPosition == 1 {
                             Text("BPM")
@@ -204,7 +218,7 @@ struct PipSettingsView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 
@@ -230,7 +244,7 @@ struct PipSettingsView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 
@@ -248,7 +262,7 @@ struct PipSettingsView: View {
             .pickerStyle(SegmentedPickerStyle())
         }
         .padding()
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 
@@ -272,7 +286,7 @@ struct PipSettingsView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 
@@ -317,7 +331,7 @@ struct PipSettingsView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 }
@@ -333,11 +347,13 @@ struct PushServiceSettingsView: View {
 
     @State private var httpPort: String = "8080"
     @State private var wsPort: String = "8081"
-    @State private var showingPortAlert = false
-    @State private var portAlertMessage = ""
     // 复制成功的顶部 Toast（设置页在 sheet 内，MainView 的 Toast 被遮挡，本页单独显示）
     @State private var toastText: String?
     @State private var toastToken = UUID()
+    @State private var toastIcon = "checkmark.circle.fill"
+    @State private var toastIconColor = Color.green
+    // 链接按下高亮（点击/长按时的视觉反馈）
+    @State private var highlightedLink: String?
 
     private let themeColor = Color(hex: "EC746F")
 
@@ -352,22 +368,21 @@ struct PushServiceSettingsView: View {
         }
         .navigationTitle("推送服务")
         .navigationBarTitleDisplayMode(.inline)
+        // 点击输入框以外的区域收起键盘
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
         .onAppear {
             httpPort = "\(settings.httpPushPort)"
             wsPort = "\(settings.wsPushPort)"
             httpServer.refreshIPs()
-        }
-        .alert("提示", isPresented: $showingPortAlert) {
-            Button("确定", role: .cancel) {}
-        } message: {
-            Text(portAlertMessage)
         }
         // 底部 Toast（复制成功提示，复用全局毛玻璃样式）
         .overlay(alignment: .bottom) {
             VStack {
                 Spacer()
                 if let toast = toastText {
-                    ToastView(text: toast)
+                    ToastView(text: toast, iconName: toastIcon, iconColor: toastIconColor)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -405,6 +420,21 @@ struct PushServiceSettingsView: View {
                         .foregroundColor(themeColor)
                 }
 
+                HStack {
+                    Text("状态")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    if httpServer.isRunning {
+                        Label("运行中", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(.green)
+                    } else {
+                        Text("未运行")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 addressLinks(scheme: "http", port: settings.httpPushPort)
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -418,7 +448,7 @@ struct PushServiceSettingsView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 
@@ -471,7 +501,7 @@ struct PushServiceSettingsView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 
@@ -487,7 +517,7 @@ struct PushServiceSettingsView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(12)
     }
 
@@ -500,11 +530,10 @@ struct PushServiceSettingsView: View {
                 viewModel.stopHttpServer()
                 viewModel.startHttpServer(port: port)
             }
-            portAlertMessage = "端口已应用"
+            showToast("端口已应用")
         } else {
-            portAlertMessage = "无效的端口号（1024-65535）"
+            showToast("无效的端口号（1024-65535）", icon: "exclamationmark.triangle.fill", iconColor: .orange)
         }
-        showingPortAlert = true
     }
 
     private func applyWsPort() {
@@ -514,11 +543,10 @@ struct PushServiceSettingsView: View {
                 wsServer.stopServer()
                 wsServer.startServer(port: port)
             }
-            portAlertMessage = "端口已应用"
+            showToast("端口已应用")
         } else {
-            portAlertMessage = "无效的端口号（1024-65535）"
+            showToast("无效的端口号（1024-65535）", icon: "exclamationmark.triangle.fill", iconColor: .orange)
         }
-        showingPortAlert = true
     }
 
     // MARK: 本机地址列表（多网络接口）
@@ -529,7 +557,7 @@ struct PushServiceSettingsView: View {
             Text("本机地址")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
-            Text("单击打开 · 长按复制")
+            Text(scheme == "ws" ? "单击复制 · 长按复制" : "单击打开 · 长按复制")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
@@ -540,9 +568,10 @@ struct PushServiceSettingsView: View {
             }
 
             ForEach(httpServer.localIPs, id: \.self) { ip in
-                if let url = URL(string: "\(scheme)://\(ip):\(port)/") {
+                let urlString = "\(scheme)://\(ip):\(port)"
+                if let url = URL(string: "\(urlString)/") {
                     HStack(spacing: 4) {
-                        Text("\(scheme)://\(ip):\(port)")
+                        Text(urlString)
                             .font(.system(size: 14, design: .monospaced))
                         if scheme == "http" {
                             Image(systemName: "arrow.up.right.square")
@@ -550,16 +579,33 @@ struct PushServiceSettingsView: View {
                         }
                     }
                     .foregroundColor(themeColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(highlightedLink == urlString ? themeColor.opacity(0.18) : Color.clear)
+                    )
                     .contentShape(Rectangle())
                     // 手势顺序照搬主界面记录 chip 的验证组合：单击在前不吞点击，长按复制后松手也不会误触发打开
                     .onTapGesture {
-                        openURL(url)
+                        if scheme == "ws" {
+                            // ws:// 协议浏览器无法打开（WS 端口也没有网页），点击转为复制
+                            UIPasteboard.general.string = urlString
+                            Haptics.light()
+                            showToast("浏览器无法打开 ws:// 地址，已复制", icon: "doc.on.doc.fill", iconColor: themeColor)
+                        } else {
+                            openURL(url)
+                        }
                     }
-                    .onLongPressGesture(minimumDuration: 0.5) {
-                        UIPasteboard.general.string = "\(scheme)://\(ip):\(port)"
+                    .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
+                        withAnimation(.easeInOut(duration: 0.12)) {
+                            highlightedLink = pressing ? urlString : nil
+                        }
+                    }, perform: {
+                        UIPasteboard.general.string = urlString
                         Haptics.light()
                         showToast("已复制")
-                    }
+                    })
                 }
             }
         }
@@ -568,9 +614,11 @@ struct PushServiceSettingsView: View {
     // MARK: 复制 / 打开手势与 Toast
 
     /// 顶部 Toast（短暂显示后自动消失，连续触发时替换上一条不叠加）
-    private func showToast(_ text: String) {
+    private func showToast(_ text: String, icon: String = "checkmark.circle.fill", iconColor: Color = .green) {
         toastToken = UUID()
         toastText = text
+        toastIcon = icon
+        toastIconColor = iconColor
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [token = toastToken] in
             if token == toastToken {
                 toastText = nil
@@ -586,15 +634,25 @@ struct PushServiceSettingsView: View {
                 Text(path)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(themeColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(highlightedLink == url.absoluteString ? themeColor.opacity(0.18) : Color.clear)
+                    )
                     .contentShape(Rectangle())
                     .onTapGesture {
                         openURL(url)
                     }
-                    .onLongPressGesture(minimumDuration: 0.5) {
+                    .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
+                        withAnimation(.easeInOut(duration: 0.12)) {
+                            highlightedLink = pressing ? url.absoluteString : nil
+                        }
+                    }, perform: {
                         UIPasteboard.general.string = url.absoluteString
                         Haptics.light()
                         showToast("已复制")
-                    }
+                    })
             } else {
                 Text(path)
                     .font(.system(size: 13, design: .monospaced))
@@ -1515,7 +1573,7 @@ struct RecordingDetailView: View {
 
                     RecordingChartView(samples: recording.samples, themeColor: recordingThemeColor, queryIndex: $queryIndex, topInset: 28)
                         .frame(height: 300)
-                        .background(Color(.systemGray6))
+                        .settingsCardBackground()
                         .cornerRadius(14)
                         .overlay(alignment: .topTrailing) {
                             Button(action: {
@@ -1562,7 +1620,7 @@ struct RecordingDetailView: View {
         }
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(14)
     }
 
@@ -2043,7 +2101,7 @@ struct AboutView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGray6))
+        .settingsCardBackground()
         .cornerRadius(14)
     }
 }

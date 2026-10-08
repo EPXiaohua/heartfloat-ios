@@ -58,7 +58,7 @@
     // 轮询兜底：WebSocket 不可用时自动启用
     function startPolling() {
       if (pollTimer) return;
-      pollTimer = setInterval(pollOnce, 500);
+      pollTimer = setInterval(pollOnce, 1000);
       pollOnce();
     }
 

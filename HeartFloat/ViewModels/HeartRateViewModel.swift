@@ -607,10 +607,17 @@ final class HeartRatePipView: UIView {
 
     func update(heartRate: Int) {
         currentHeartRate = heartRate
-        numberLabel.text = heartRate > 0 ? "\(heartRate)" : "--"
+        let newText = heartRate > 0 ? "\(heartRate)" : "--"
+        guard newText != numberLabel.text else { return }
+        // 与主页一致：BPM 变化时淡入淡出过渡
+        UIView.transition(with: numberLabel, duration: 0.3, options: [.transitionCrossDissolve]) {
+            self.numberLabel.text = newText
+        }
         // 文本宽度变化后重新布局，避免被截断成省略号
         setNeedsLayout()
-        layoutIfNeeded()
+        UIView.animate(withDuration: 0.3) {
+            self.layoutIfNeeded()
+        }
     }
 
     override func layoutSubviews() {
@@ -625,9 +632,12 @@ final class HeartRatePipView: UIView {
         cardView.frame = bounds
         cardView.layer.cornerRadius = 0
 
-        // 字体随窗口尺寸缩放（基准 240x160 下的 size*2.5 / size*2）
+        // 字体随窗口尺寸缩放（基准 240x160 下的 size*2.5 / size*2）；数字用主页同款圆体
         let scale = min(boundsW / 240.0, boundsH / 160.0)
-        numberLabel.font = .systemFont(ofSize: CGFloat(s.bpmNumberSize) * 2.5 * scale, weight: .bold)
+        let numberBase = UIFont.systemFont(ofSize: CGFloat(s.bpmNumberSize) * 2.5 * scale, weight: .bold)
+        numberLabel.font = numberBase.fontDescriptor.withDesign(.rounded).map {
+            UIFont(descriptor: $0, size: numberBase.pointSize)
+        } ?? numberBase
         bpmLabel.font = .systemFont(ofSize: CGFloat(s.bpmLabelSize) * 2.0 * scale, weight: .medium)
 
         let numberFont = numberLabel.font ?? .systemFont(ofSize: 14)
