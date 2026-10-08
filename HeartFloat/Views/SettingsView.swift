@@ -12,7 +12,7 @@ private struct SettingsCardBackground: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
-        content.background(colorScheme == .dark ? Color(white: 0.14) : Color(.systemGray6))
+        content.background(colorScheme == .dark ? Color(white: 0.17) : Color(.systemGray6))
     }
 }
 
@@ -368,6 +368,17 @@ struct PushServiceSettingsView: View {
         }
         .navigationTitle("推送服务")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    Haptics.light()
+                    httpServer.refreshIPs()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            }
+        }
         // 点击输入框以外的区域收起键盘
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -497,6 +508,8 @@ struct PushServiceSettingsView: View {
                     }
                 }
 
+                connectedDevices
+
                 addressLinks(scheme: "ws", port: wsServer.currentPort)
             }
         }
@@ -519,6 +532,61 @@ struct PushServiceSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .settingsCardBackground()
         .cornerRadius(12)
+    }
+
+    // MARK: 连接的设备（WebSocket 客户端管理与踢出）
+
+    private var connectedDevices: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("连接的设备")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+
+            if wsServer.clients.isEmpty {
+                Text("暂无设备连接")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(wsServer.clients) { client in
+                HStack(spacing: 10) {
+                    Image(systemName: "dot.radiowaves.up.forward")
+                        .font(.system(size: 13))
+                        .foregroundColor(themeColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(client.ip):\(client.port)")
+                            .font(.system(size: 14, design: .monospaced))
+                        // 每秒刷新连接时长
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            Text("已连接 \(Self.connectedDuration(since: client.connectedAt))")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        Haptics.light()
+                        wsServer.kick(client)
+                    } label: {
+                        Text("断开")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.red.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    /// 连接时长文本（分:秒 或 时:分:秒）
+    private static func connectedDuration(since date: Date) -> String {
+        let interval = max(0, Int(Date().timeIntervalSince(date)))
+        let h = interval / 3600, m = interval % 3600 / 60, s = interval % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
     // MARK: 端口应用
@@ -592,7 +660,7 @@ struct PushServiceSettingsView: View {
                             // ws:// 协议浏览器无法打开（WS 端口也没有网页），点击转为复制
                             UIPasteboard.general.string = urlString
                             Haptics.light()
-                            showToast("已复制", icon: "doc.on.doc.fill", iconColor: themeColor)
+                            showToast("已复制")
                         } else {
                             openURL(url)
                         }

@@ -251,9 +251,18 @@ class HttpServerManager: ObservableObject {
 class WsServerManager: ObservableObject {
     static let shared = WsServerManager()
 
+    /// 已连接的客户端设备（推送服务页展示与踢出管理用）
+    struct WsClientInfo: Identifiable, Equatable {
+        let id: ObjectIdentifier
+        let ip: String
+        let port: UInt16
+        let connectedAt: Date
+    }
+
     @Published var isRunning: Bool = false
     @Published var currentPort: Int = 8081
     @Published var clientCount: Int = 0
+    @Published var clients: [WsClientInfo] = []
 
     private var listener: NWListener?
     private var connections: [NWConnection] = []
@@ -320,14 +329,45 @@ class WsServerManager: ObservableObject {
             guard let self = self else { return }
             self.connections.forEach { $0.cancel() }
             self.connections.removeAll()
-            DispatchQueue.main.async { self.clientCount = 0 }
+            DispatchQueue.main.async {
+                self.clientCount = 0
+                self.clients = []
+            }
         }
+    }
+
+    /// 主动断开指定客户端设备（推送服务页「断开」按钮）
+    func kick(_ info: WsClientInfo) {
+        queue.async { [weak self] in
+            guard let self = self,
+                  let connection = self.connections.first(where: { ObjectIdentifier($0) == info.id }) else { return }
+            self.dropConnection(connection)
+        }
+    }
+
+    /// 从连接的 remote endpoint 提取设备地址
+    private static func remoteAddress(of connection: NWConnection) -> (ip: String, port: UInt16)? {
+        guard case .hostPort(let host, let port) = connection.endpoint else { return nil }
+        let hostStr: String
+        switch host {
+        case .ipv4(let addr): hostStr = "\(addr)"
+        case .ipv6(let addr): hostStr = "\(addr)"
+        case .name(let name, _): hostStr = name
+        @unknown default: hostStr = "\(host)"
+        }
+        return (hostStr, port.rawValue)
     }
 
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: queue)
         connections.append(connection)
-        DispatchQueue.main.async { self.clientCount = self.connections.count }
+        let info = WsServerManager.remoteAddress(of: connection).map {
+            WsClientInfo(id: ObjectIdentifier(connection), ip: $0.ip, port: $0.port, connectedAt: Date())
+        }
+        DispatchQueue.main.async {
+            self.clientCount = self.connections.count
+            if let info = info { self.clients.append(info) }
+        }
         receiveNext(connection)
         // 新客户端立即同步一次当前状态
         broadcastCurrent()
@@ -369,7 +409,10 @@ class WsServerManager: ObservableObject {
             guard let self = self else { return }
             connection.cancel()
             self.connections.removeAll { $0 === connection }
-            DispatchQueue.main.async { self.clientCount = self.connections.count }
+            DispatchQueue.main.async {
+                self.clientCount = self.connections.count
+                self.clients.removeAll { $0.id == ObjectIdentifier(connection) }
+            }
         }
     }
 }
