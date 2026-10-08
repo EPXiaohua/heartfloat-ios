@@ -49,10 +49,17 @@
     var ws = null;
     var pollTimer = null;
     var reconnectTimer = null;
+    var dataTimer = null;
 
     function apply(bpm) {
       bpmEl.textContent = bpm || '--';
       heartEl.style.animationDuration = bpm ? (60 / bpm) + 's' : '1s';
+      heartEl.style.opacity = bpm ? '1' : '0.4';
+      // 数据看门狗：5 秒收不到新数据时复位（防止断开后爱心一直按旧节奏跳）
+      if (dataTimer) { clearTimeout(dataTimer); dataTimer = null; }
+      if (bpm) {
+        dataTimer = setTimeout(function () { apply(null); }, 5000);
+      }
     }
 
     // 轮询兜底：WebSocket 不可用时自动启用

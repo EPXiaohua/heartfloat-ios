@@ -27,7 +27,6 @@ class BleService: NSObject, ObservableObject {
     private var watchdogWork: DispatchWorkItem?
     private var gattTimeoutWork: DispatchWorkItem?
     private var lastNotificationAt: Date = .distantPast
-    private var isManualStop = false
     private var isSkippingDevice = false
     /// 上次成功连接的设备（直连不依赖广播，避免断开后设备恢复广播慢导致扫不到）
     @Published var lastConnectedIdentifier: UUID?
@@ -152,7 +151,6 @@ class BleService: NSObject, ObservableObject {
             connectedPeripheral = nil
             connectedDeviceName = ""
             heartRateCharacteristic = nil
-            isManualStop = true
             connectionState = .disconnected
             addLog("已取消连接")
         }
@@ -174,7 +172,6 @@ class BleService: NSObject, ObservableObject {
     }
 
     func disconnect() {
-        isManualStop = true
         scanTimeoutWork?.cancel()
         watchdogWork?.cancel()
         gattTimeoutWork?.cancel()
@@ -333,19 +330,6 @@ extension BleService: CBCentralManagerDelegate {
         connectedPeripheral = nil
         connectedDeviceName = ""
         heartRateCharacteristic = nil
-
-        // 用户主动断开时不自动重连
-        if isManualStop {
-            isManualStop = false
-            return
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
-            if self?.connectionState == .disconnected {
-                self?.addLog("尝试重新连接...")
-                self?.startScan()
-            }
-        }
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {

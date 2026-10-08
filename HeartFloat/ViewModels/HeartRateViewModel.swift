@@ -211,8 +211,11 @@ class HeartRateViewModel: NSObject, ObservableObject {
         activeRecording = nil
         recordingStartedAt = nil
         HeartRateRecordingStore.removeUnsaved()
-        // 少于两个采样点的会话没有查看价值，不保存
-        guard session.samples.count >= 2 else { return }
+        // 少于两个采样点的会话没有查看价值，不保存并提示
+        guard session.samples.count >= 2 else {
+            showToast("采样点不足，记录未保存", icon: "exclamationmark.triangle.fill", iconColor: .orange)
+            return
+        }
         HeartRateRecordingStore.save(session)
         recordings = HeartRateRecordingStore.loadAll()
         if let text = text {

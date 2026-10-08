@@ -384,6 +384,8 @@ struct PulsingHeartIcon: View {
 
     @State private var beating = false
     @State private var beatToken = UUID()
+    // 循环守卫：延迟回调捕获的是旧 struct 拷贝，active 需经 @State 共享存储读取实时值
+    @State private var isActive = false
 
     var body: some View {
         Image(systemName: "heart.fill")
@@ -391,9 +393,15 @@ struct PulsingHeartIcon: View {
             .foregroundColor(color)
             .scaleEffect(beating ? 1.22 : 1.0)
             .opacity(active ? 1 : 0.35)
-            .onAppear(perform: restart)
+            .onAppear {
+                isActive = active
+                restart()
+            }
             .onChange(of: bpm) { _ in restart() }
-            .onChange(of: active) { _ in restart() }
+            .onChange(of: active) { newValue in
+                isActive = newValue
+                restart()
+            }
     }
 
     private func restart() {
@@ -406,7 +414,7 @@ struct PulsingHeartIcon: View {
 
     /// 以 60/bpm 秒为周期循环：收缩 0.1s → 舒张 0.3s → 等待
     private func startLoop(token myToken: UUID) {
-        guard active, bpm >= 30 else { return }
+        guard isActive, bpm >= 30 else { return }
         let interval = 60.0 / Double(max(bpm, 30))
         let capturedToken = beatToken
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
