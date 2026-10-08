@@ -557,7 +557,7 @@ struct PushServiceSettingsView: View {
             Text("本机地址")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
-            Text(scheme == "ws" ? "单击复制 · 长按复制" : "单击打开 · 长按复制")
+            Text(scheme == "ws" ? "浏览器无法打开 ws:// 地址，单击即可复制" : "单击打开 · 长按复制")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
@@ -592,7 +592,7 @@ struct PushServiceSettingsView: View {
                             // ws:// 协议浏览器无法打开（WS 端口也没有网页），点击转为复制
                             UIPasteboard.general.string = urlString
                             Haptics.light()
-                            showToast("浏览器无法打开 ws:// 地址，已复制", icon: "doc.on.doc.fill", iconColor: themeColor)
+                            showToast("已复制", icon: "doc.on.doc.fill", iconColor: themeColor)
                         } else {
                             openURL(url)
                         }
