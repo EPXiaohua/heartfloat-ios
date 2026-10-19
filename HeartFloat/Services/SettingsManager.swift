@@ -12,6 +12,8 @@ class SettingsManager: ObservableObject {
     @AppStorage("bpmLabelColorHex") var bpmLabelColorHex: String = "FFFFFF"
     @AppStorage("bpmPosition") var bpmPosition: Int = 3
     @AppStorage("backgroundBrightness") var backgroundBrightness: Double = 0
+    /// 悬浮窗样式：0 = 数字卡片，1 = 心率曲线
+    @AppStorage("pipStyle") var pipStyle: Int = 0
     @AppStorage("httpPushEnabled") var httpPushEnabled: Bool = false
     @AppStorage("httpPushPort") var httpPushPort: Int = 8080
     @AppStorage("wsPushEnabled") var wsPushEnabled: Bool = false

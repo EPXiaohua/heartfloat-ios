@@ -103,6 +103,7 @@ struct GeneralSettingsView: View {
 
 struct PipSettingsView: View {
     @EnvironmentObject var settings: SettingsManager
+    @EnvironmentObject var viewModel: HeartRateViewModel
 
     @State private var showingColorPicker = false
     @State private var colorPickerTarget: ColorPickerTarget = .bpmNumber
@@ -115,6 +116,8 @@ struct PipSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
+                styleSection
+
                 previewSection
 
                 bpmNumberSettings
@@ -145,6 +148,26 @@ struct PipSettingsView: View {
         }
     }
 
+    private var styleSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("悬浮窗样式")
+                .font(.system(size: 16, weight: .bold))
+
+            Picker("样式", selection: $settings.pipStyle) {
+                Text("数字").tag(0)
+                Text("心率曲线").tag(1)
+            }
+            .pickerStyle(SegmentedPickerStyle())
+
+            Text("「心率曲线」显示 60 秒滚动实时曲线与节拍光斑，BPM 数字按位置设置叠加在曲线上。")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+
     private var previewSection: some View {
         VStack(spacing: 8) {
             Text("预览")
@@ -154,7 +177,11 @@ struct PipSettingsView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 24)
                     .fill(Color(white: settings.backgroundBrightness / 100))
-                    .frame(height: 80)
+                    .frame(height: 88)
+
+                if settings.pipStyle == 1 {
+                    PipCurvePreview(themeColor: settings.bpmNumberColor)
+                }
 
                 if settings.bpmPosition == 0 || settings.bpmPosition == 1 {
                     // 纵向排列：BPM 在上 / 下
@@ -333,6 +360,87 @@ struct PipSettingsView: View {
         .padding()
         .settingsCardBackground()
         .cornerRadius(12)
+    }
+}
+
+// MARK: - 悬浮窗曲线预览（简化版主页实时曲线，用于样式预览）
+
+private struct PipCurvePreview: View {
+    @EnvironmentObject var viewModel: HeartRateViewModel
+    let themeColor: Color
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { timeline in
+            Canvas { context, size in
+                draw(in: &context, size: size, now: timeline.date)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize, now: Date) {
+        let samples = viewModel.heartRateSamples.filter { now.timeIntervalSince($0.0) <= 61 }
+        let valid = samples.filter { $0.1 > 0.05 }
+
+        guard valid.count >= 2, let newest = valid.last else {
+            let hint = viewModel.connectionState == .connected ? "正在采集心率数据..." : "连接手环后显示心率曲线"
+            context.draw(
+                Text(hint).font(.system(size: 11)).foregroundColor(.secondary),
+                at: CGPoint(x: size.width / 2, y: size.height / 2))
+            return
+        }
+
+        // 值域自适应（与 PiP 渲染器一致：span 下限 20）
+        let values = valid.map { $0.1 }
+        let vmin = values.min() ?? 60
+        let vmax = values.max() ?? 100
+        let mid = (vmin + vmax) / 2
+        let span = max(vmax - vmin, 20) * 1.15
+        let lo = mid - span / 2
+        let hi = mid + span / 2
+
+        // 时间轴右缘跟随最新采样点
+        let base = newest.0
+        let oldest = valid[0].0
+        let viewport = min(60.0, max(base.timeIntervalSince(oldest), 5.0))
+        let plot = CGRect(x: 0, y: 4, width: size.width, height: size.height - 8)
+
+        func yFor(_ v: Double) -> CGFloat {
+            plot.maxY - CGFloat(min(max((v - lo) / max(hi - lo, 1), -0.2), 1.2)) * plot.height
+        }
+        func xFor(_ t: Date) -> CGFloat {
+            plot.maxX - CGFloat(base.timeIntervalSince(t) / viewport) * plot.width
+        }
+
+        context.clip(to: Path(plot))
+
+        var line = Path()
+        var started = false
+        for (t, v) in valid {
+            let p = CGPoint(x: xFor(t), y: yFor(v))
+            if started {
+                line.addLine(to: p)
+            } else {
+                line.move(to: p)
+                started = true
+            }
+        }
+
+        var fill = line
+        fill.addLine(to: CGPoint(x: plot.maxX, y: plot.maxY))
+        fill.addLine(to: CGPoint(x: plot.minX, y: plot.maxY))
+        fill.closeSubpath()
+        context.fill(fill, with: .linearGradient(
+            Gradient(colors: [themeColor.opacity(0.30), themeColor.opacity(0.02)]),
+            startPoint: CGPoint(x: 0, y: plot.minY),
+            endPoint: CGPoint(x: 0, y: plot.maxY)))
+        context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+
+        if let last = valid.last, last.1 > 0.05 {
+            context.fill(
+                Path(ellipseIn: CGRect(x: plot.maxX - 3, y: yFor(last.1) - 3, width: 6, height: 6)),
+                with: .color(themeColor))
+        }
     }
 }
 
@@ -2231,7 +2339,7 @@ struct CacheCleanupOverlayView: View {
                     .multilineTextAlignment(.center)
 
                 if phase == .ready {
-                    Text("画中画载体视频缓存、导出临时文件等可再生数据")
+                    Text("导出临时文件、系统缓存等可再生数据（旧版本遗留的画中画载体视频也会一并清理）")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -2386,7 +2494,7 @@ struct StorageManageView: View {
                 } header: {
                     Text("数据占用")
                 } footer: {
-                    Text("应用占用包含 App 本体与全部数据；其中临时缓存包含画中画载体视频、导出临时文件及系统缓存目录等可再生数据，清理后不影响心率记录。心率记录可在设置一级页面查看与管理。")
+                    Text("应用占用包含 App 本体与全部数据；其中临时缓存包含导出临时文件及系统缓存目录等可再生数据，清理后不影响心率记录。心率记录可在设置一级页面查看与管理。")
                 }
 
                 Section {
@@ -2499,7 +2607,7 @@ struct StorageManageView: View {
     }
 }
 
-// MARK: - 缓存计算与清理（临时目录均为可再生数据：载体视频、导出的临时文件等）
+// MARK: - 缓存计算与清理（临时目录均为可再生数据：导出的临时文件、系统缓存等）
 
 private enum CacheCleaner {
     /// 可清理的缓存目录：临时目录 + Library/Caches（标准缓存目录）
