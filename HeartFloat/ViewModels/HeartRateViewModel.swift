@@ -346,8 +346,8 @@ class HeartRateViewModel: NSObject, ObservableObject {
             sampleBufferDisplayLayer: layer,
             playbackDelegate: self)
         let controller = AVPictureInPictureController(contentSource: source)
-        controller?.canStartPictureInPictureAutomaticallyFromInline = true
-        controller?.delegate = self
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        controller.delegate = self
 
         pipSampleLayer = layer
         pipController = controller
@@ -511,6 +511,15 @@ extension HeartRateViewModel: AVPictureInPictureSampleBufferPlaybackDelegate {
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {
         // 窗口尺寸变化由 videoGravity 自适应，无需处理
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime, completion: @escaping () -> Void) {
+        // 无可播放媒体，快进快退请求无意义，直接完成
+        completion()
+    }
+
+    func pictureInPictureControllerShouldProhibitBackgroundAudioPlayback(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
+        false
     }
 }
 
