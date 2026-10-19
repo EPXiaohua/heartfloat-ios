@@ -22,6 +22,7 @@ final class HeartRatePipFrameRenderer {
     var isConnected: Bool = false
 
     private var pixelPool: CVPixelBufferPool?
+    private var poolSize: CGSize = .zero
 
     // MARK: - 帧生成
 
@@ -91,9 +92,7 @@ final class HeartRatePipFrameRenderer {
     }
 
     private func pixelBufferPool(size: CGSize) -> CVPixelBufferPool? {
-        if let pixelPool, CVPixelBufferPoolGetPixelWidth(pixelPool) == Int(size.width) {
-            return pixelPool
-        }
+        if let pixelPool, poolSize == size { return pixelPool }
         let attributes: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey: Int(size.width),
@@ -106,6 +105,7 @@ final class HeartRatePipFrameRenderer {
                 &created) == kCVReturnSuccess,
               let created else { return nil }
         pixelPool = created
+        poolSize = size
         return created
     }
 
