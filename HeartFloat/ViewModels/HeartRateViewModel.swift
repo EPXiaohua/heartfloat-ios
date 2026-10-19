@@ -57,6 +57,8 @@ class HeartRateViewModel: NSObject, ObservableObject {
     private let settings = SettingsManager.shared
     private var cancellables = Set<AnyCancellable>()
     private var pipController: AVPictureInPictureController?
+    /// 已成功入队过至少一帧（layer 无帧时系统不会开 PiP 窗）
+    private var pipHasPainted = false
     /// 图层容器：sampleBufferDisplayLayer 必须挂进视图层级才能激活 PiP（不可见摆放）
     private var pipCarrierView: UIView?
     private var pipSampleLayer: AVSampleBufferDisplayLayer?
@@ -328,33 +330,39 @@ class HeartRateViewModel: NSObject, ObservableObject {
         }
 
         userRequestedStop = false
-        addLog("正在启动画中画（官方视频通话方案）...")
+        addLog("正在启动画中画...")
 
         configureAudioSession()
 
-        // 关键：sampleBufferDisplayLayer 必须在屏幕内的可见层级中渲染，
-        // 系统才允许 PiP 启动（屏幕外/透明度过低会导致 isPictureInPicturePossible 恒为 false）。
-        // 用 2x2pt 的透明小视图挂在屏幕角落，layer 内容缩到 2pt 显示，肉眼不可见但处于渲染状态；
-        // PiP 窗口按视频帧的实际尺寸（240x160）渲染，与层在屏上的显示大小无关。
-        let carrier = UIView(frame: CGRect(x: 0, y: 0, width: 2, height: 2))
-        carrier.backgroundColor = .clear
+        // 离屏宿主：layer 必须挂在窗口层级里 PiP 才会从它取帧；
+        // 全尺寸透明视图放在屏幕外即可，肉眼不可见，PiP 窗口按视频帧内容渲染
+        guard let rootVC = keyWindow.rootViewController else {
+            addLog("无法获取根视图")
+            return
+        }
+        let host = UIView(frame: CGRect(
+            x: -HeartRatePipFrameRenderer.size.width - 16, y: -8,
+            width: HeartRatePipFrameRenderer.size.width,
+            height: HeartRatePipFrameRenderer.size.height))
+        host.backgroundColor = .clear
+        host.isUserInteractionEnabled = false
         let layer = AVSampleBufferDisplayLayer()
         layer.videoGravity = .resizeAspect
-        layer.frame = carrier.bounds
-        carrier.layer.addSublayer(layer)
-        keyWindow.addSubview(carrier)
+        layer.frame = host.bounds
+        host.layer.addSublayer(layer)
+        rootVC.view.addSubview(host)
 
-        // 官方方案：sampleBufferDisplayLayer + 播放代理，无载体视频、无 KVC hack
+        // 官方视频通话方案：sampleBufferDisplayLayer + 播放代理
         let source = AVPictureInPictureController.ContentSource(
             sampleBufferDisplayLayer: layer,
             playbackDelegate: self)
         let controller = AVPictureInPictureController(contentSource: source)
-        controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.delegate = self
+        controller.requiresLinearPlayback = true
 
         pipSampleLayer = layer
         pipController = controller
-        pipCarrierView = carrier
+        pipCarrierView = host
 
         startRenderLoop()
 
@@ -365,19 +373,20 @@ class HeartRateViewModel: NSObject, ObservableObject {
                 return
             }
             checks += 1
-            if ctrl.isPictureInPicturePossible && !self.isPipActive && !self.userRequestedStop {
+            let infraReady = self.pipHasPainted && (self.pipCarrierView?.window != nil)
+            if infraReady && ctrl.isPictureInPicturePossible && !self.isPipActive && !self.userRequestedStop {
                 timer.invalidate()
                 self.addLog("PiP 就绪，启动中...")
                 ctrl.startPictureInPicture()
             } else if checks >= 40 {
                 timer.invalidate()
-                self.addLog("PiP 就绪超时 (possible=\(ctrl.isPictureInPicturePossible))，退出到主屏幕可自动进入悬浮窗")
+                self.addLog("PiP 就绪超时 (possible=\(ctrl.isPictureInPicturePossible), painted=\(self.pipHasPainted))")
                 self.teardownPip(log: false)
             }
         }
     }
 
-    /// 视频通话画中画要求 audio session 处于激活的 playback 模式，否则 PiP 可能启动失败
+    /// 视频通话画中画要求 audio session 处于激活状态，否则 PiP 可能启动失败
     private func configureAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
@@ -408,6 +417,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
         pipSampleLayer = nil
         pipCarrierView?.removeFromSuperview()
         pipCarrierView = nil
+        pipHasPainted = false
         restoreAudioSession()
         if log {
             addLog("画中画已关闭")
@@ -419,6 +429,8 @@ class HeartRateViewModel: NSObject, ObservableObject {
     private func startRenderLoop() {
         stopRenderLoop()
         pipFrameRenderer.settings = settings
+        // 立即画首帧：layer 无帧时系统不会开 PiP 窗
+        enqueueFrame()
         let timer = Timer(timeInterval: 1.0 / Double(HeartRatePipFrameRenderer.frameRate), repeats: true) { [weak self] _ in
             self?.enqueueFrame()
         }
@@ -433,14 +445,24 @@ class HeartRateViewModel: NSObject, ObservableObject {
 
     private func enqueueFrame() {
         guard let layer = pipSampleLayer else { return }
-        // 层进入失败态（如后台恢复）时清空重试
-        if layer.status == .failed { layer.flush() }
+        // failed 态的 renderer 会静默吞帧（表现为画面冻结），先 flush 再入队
+        if #available(iOS 17.0, *) {
+            let renderer = layer.sampleBufferRenderer
+            if renderer.status == .failed { renderer.flush() }
+        } else {
+            if layer.status == .failed { layer.flush() }
+        }
         pipFrameRenderer.samples = heartRateSamples
         pipFrameRenderer.heartRate = heartRate
         pipFrameRenderer.isConnected = connectionState == .connected
         let hostTime = CMClockGetTime(CMClockGetHostTimeClock())
         if let sampleBuffer = pipFrameRenderer.makeSampleBuffer(at: hostTime) {
-            layer.enqueue(sampleBuffer)
+            if #available(iOS 17.0, *) {
+                layer.sampleBufferRenderer.enqueue(sampleBuffer)
+            } else {
+                layer.enqueue(sampleBuffer)
+            }
+            pipHasPainted = true
         }
     }
 

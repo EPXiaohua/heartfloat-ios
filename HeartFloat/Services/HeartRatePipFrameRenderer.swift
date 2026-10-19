@@ -21,79 +21,111 @@ final class HeartRatePipFrameRenderer {
     /// 是否已连接（未连接时显示占位）
     var isConnected: Bool = false
 
+    private var pixelPool: CVPixelBufferPool?
+
     // MARK: - 帧生成
 
-    private func makePixelBuffer() -> CVPixelBuffer? {
-        let attrs: [String: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey as String: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
-        ]
-        var pixelBuffer: CVPixelBuffer?
-        CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            Int(Self.size.width), Int(Self.size.height),
-            kCVPixelFormatType_32BGRA, attrs as CFDictionary, &pixelBuffer)
-        return pixelBuffer
-    }
-
-    /// 渲染一帧并包装为 CMSampleBuffer
+    /// 渲染一帧并包装为 CMSampleBuffer：
+    /// @2x 位图绘制 UI → blit 进 CVPixelBufferPool 的 buffer → 包 sample 并设 DisplayImmediately。
+    /// DisplayImmediately 是关键：sample buffer layer 没有 timebase，缺了它帧永远不会被展示（黑屏）。
     func makeSampleBuffer(at hostTime: CMTime) -> CMSampleBuffer? {
-        guard let buffer = makePixelBuffer() else { return nil }
-        draw(into: buffer)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: Self.size, format: format)
+        let image = renderer.image { ctx in
+            // 渲染器上下文已是 UIKit 左上原点坐标系，直接画即可
+            self.draw(into: ctx.cgContext, bounds: CGRect(origin: .zero, size: Self.size))
+        }
+        guard let cgImage = image.cgImage else { return nil }
 
-        var format: CMVideoFormatDescription?
-        CMVideoFormatDescriptionCreateForImageBuffer(
-            allocator: kCFAllocatorDefault, imageBuffer: buffer, formatDescriptionOut: &format)
-        guard let formatDescription = format else { return nil }
+        let pixels = CGSize(width: cgImage.width, height: cgImage.height)
+        guard let pool = pixelBufferPool(size: pixels) else { return nil }
+        var buffer: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer) == kCVReturnSuccess,
+              let buffer else { return nil }
 
+        CVPixelBufferLockBaseAddress(buffer, [])
+        let blit = CGContext(
+            data: CVPixelBufferGetBaseAddress(buffer),
+            width: cgImage.width,
+            height: cgImage.height,
+            bitsPerComponent: 8,
+            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue)
+        blit?.draw(cgImage, in: CGRect(origin: .zero, size: pixels))
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        guard blit != nil else { return nil }
+
+        var formatDescription: CMFormatDescription?
+        guard CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: kCFAllocatorDefault,
+                imageBuffer: buffer,
+                formatDescriptionOut: &formatDescription) == noErr,
+              let formatDescription else { return nil }
+
+        // PTS 取 hostTime 当前时刻 + DisplayImmediately：每帧到达即显示
         var timing = CMSampleTimingInfo(
-            duration: CMTime(value: 1, timescale: Self.frameRate),
+            duration: .invalid,
             presentationTimeStamp: hostTime,
             decodeTimeStamp: .invalid)
-        var sampleBuffer: CMSampleBuffer?
-        CMSampleBufferCreateForImageBuffer(
-            allocator: kCFAllocatorDefault, imageBuffer: buffer, dataReady: true,
-            makeDataReadyCallback: nil, refcon: nil,
-            formatDescription: formatDescription, sampleTiming: &timing, sampleBufferOut: &sampleBuffer)
-        return sampleBuffer
+        var sample: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(
+                allocator: kCFAllocatorDefault,
+                imageBuffer: buffer,
+                formatDescription: formatDescription,
+                sampleTiming: &timing,
+                sampleBufferOut: &sample) == noErr,
+              let sample else { return nil }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+           CFArrayGetCount(attachments) > 0 {
+            let entry = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(
+                entry,
+                Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        return sample
+    }
+
+    private func pixelBufferPool(size: CGSize) -> CVPixelBufferPool? {
+        if let pixelPool, CVPixelBufferPoolGetPixelWidth(pixelPool) == Int(size.width) {
+            return pixelPool
+        }
+        let attributes: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey: Int(size.width),
+            kCVPixelBufferHeightKey: Int(size.height),
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary
+        ]
+        var created: CVPixelBufferPool?
+        guard CVPixelBufferPoolCreate(
+                kCFAllocatorDefault, nil, attributes as CFDictionary,
+                &created) == kCVReturnSuccess,
+              let created else { return nil }
+        pixelPool = created
+        return created
     }
 
     // MARK: - 绘制
 
-    private func draw(into buffer: CVPixelBuffer) {
-        CVPixelBufferLockBaseAddress(buffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
-
-        let width = CVPixelBufferGetWidth(buffer)
-        let height = CVPixelBufferGetHeight(buffer)
-        guard let context = CGContext(
-            data: CVPixelBufferGetBaseAddress(buffer),
-            width: width, height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else { return }
-
-        // 背景：亮度设置 0 = 纯黑，100 = 纯白
+    private func draw(into ctx: CGContext, bounds: CGRect) {
+        // 背景：亮度设置 0 = 纯黑，100 = 纯白（不透明视频帧用实色）
         let brightness = max(0, min(100, settings?.backgroundBrightness ?? 0)) / 100.0
-        context.setFillColor(UIColor(white: CGFloat(brightness), alpha: 1).cgColor)
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.setFillColor(UIColor(white: CGFloat(brightness), alpha: 1).cgColor)
+        ctx.fill(bounds)
 
-        // CVPixelBuffer 的 CG 坐标系原点在左下，翻转成 UIKit 风格（左上原点）方便布局
-        context.translateBy(x: 0, y: CGFloat(height))
-        context.scaleBy(x: 1, y: -1)
-
-        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
         let s = settings
         if s?.pipStyle == 1 {
             // 曲线样式：曲线占窗口底部 42%，数字叠加在上部 55% 区域（避免与曲线重叠）
-            drawCurve(in: context, bounds: bounds, settings: s)
+            drawCurve(in: ctx, bounds: bounds, settings: s)
             var textBounds = bounds
             textBounds.size.height = bounds.height * 0.55
-            drawNumberAndLabel(in: context, bounds: textBounds, settings: s, withPlate: true)
+            drawNumberAndLabel(in: ctx, bounds: textBounds, settings: s, withPlate: true)
         } else {
-            drawNumberAndLabel(in: context, bounds: bounds, settings: s, withPlate: false)
+            drawNumberAndLabel(in: ctx, bounds: bounds, settings: s, withPlate: false)
         }
     }
 
