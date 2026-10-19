@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import SwiftUI
 import AVFoundation
 
 /// PiP 帧渲染器：把心率 UI 直接绘制进 CMSampleBuffer（官方视频通话画中画方案，无载体视频）。
@@ -154,7 +155,7 @@ final class HeartRatePipFrameRenderer {
         }
 
         // 渐变填充
-        let fill = UIBezierPath(path: line)
+        let fill = line.copy() as! UIBezierPath
         fill.addLine(to: CGPoint(x: plot.maxX, y: plot.maxY))
         fill.addLine(to: CGPoint(x: plot.minX, y: plot.maxY))
         fill.close()
