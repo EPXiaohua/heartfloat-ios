@@ -330,14 +330,17 @@ class HeartRateViewModel: NSObject, ObservableObject {
         userRequestedStop = false
         addLog("正在启动画中画（官方视频通话方案）...")
 
-        let carrier = UIView(frame: CGRect(x: -10, y: -10, width: 1, height: 1))
-        carrier.alpha = 0.01
+        configureAudioSession()
+
+        // 关键：sampleBufferDisplayLayer 必须在屏幕内的可见层级中渲染，
+        // 系统才允许 PiP 启动（屏幕外/透明度过低会导致 isPictureInPicturePossible 恒为 false）。
+        // 用 2x2pt 的透明小视图挂在屏幕角落，layer 内容缩到 2pt 显示，肉眼不可见但处于渲染状态；
+        // PiP 窗口按视频帧的实际尺寸（240x160）渲染，与层在屏上的显示大小无关。
+        let carrier = UIView(frame: CGRect(x: 0, y: 0, width: 2, height: 2))
+        carrier.backgroundColor = .clear
         let layer = AVSampleBufferDisplayLayer()
         layer.videoGravity = .resizeAspect
-        layer.frame = CGRect(
-            x: 0, y: 0,
-            width: HeartRatePipFrameRenderer.size.width,
-            height: HeartRatePipFrameRenderer.size.height)
+        layer.frame = carrier.bounds
         carrier.layer.addSublayer(layer)
         keyWindow.addSubview(carrier)
 
@@ -366,12 +369,27 @@ class HeartRateViewModel: NSObject, ObservableObject {
                 timer.invalidate()
                 self.addLog("PiP 就绪，启动中...")
                 ctrl.startPictureInPicture()
-            } else if checks >= 20 {
+            } else if checks >= 40 {
                 timer.invalidate()
-                self.addLog("PiP 启动超时 (possible=\(ctrl.isPictureInPicturePossible))")
+                self.addLog("PiP 就绪超时 (possible=\(ctrl.isPictureInPicturePossible))，退出到主屏幕可自动进入悬浮窗")
                 self.teardownPip(log: false)
             }
         }
+    }
+
+    /// 视频通话画中画要求 audio session 处于激活的 playback 模式，否则 PiP 可能启动失败
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            addLog("Audio Session 配置失败: \(error.localizedDescription)")
+        }
+    }
+
+    private func restoreAudioSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func stopPip() {
@@ -390,6 +408,7 @@ class HeartRateViewModel: NSObject, ObservableObject {
         pipSampleLayer = nil
         pipCarrierView?.removeFromSuperview()
         pipCarrierView = nil
+        restoreAudioSession()
         if log {
             addLog("画中画已关闭")
         }

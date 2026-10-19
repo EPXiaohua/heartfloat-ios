@@ -87,8 +87,11 @@ final class HeartRatePipFrameRenderer {
         let bounds = CGRect(x: 0, y: 0, width: width, height: height)
         let s = settings
         if s?.pipStyle == 1 {
+            // 曲线样式：曲线占窗口底部 42%，数字叠加在上部 55% 区域（避免与曲线重叠）
             drawCurve(in: context, bounds: bounds, settings: s)
-            drawNumberAndLabel(in: context, bounds: bounds, settings: s, withPlate: true)
+            var textBounds = bounds
+            textBounds.size.height = bounds.height * 0.55
+            drawNumberAndLabel(in: context, bounds: textBounds, settings: s, withPlate: true)
         } else {
             drawNumberAndLabel(in: context, bounds: bounds, settings: s, withPlate: false)
         }
@@ -101,7 +104,11 @@ final class HeartRatePipFrameRenderer {
         defer { UIGraphicsPopContext() }
 
         let color = UIColor(Color(hex: s?.bpmNumberColorHex ?? "FF6B6B"))
-        let plot = bounds.insetBy(dx: 8, dy: 10)
+        // 曲线绘图区：窗口底部 42%，左右留 10pt 边距
+        let curveHeight = bounds.height * 0.42
+        let plot = CGRect(
+            x: 10, y: bounds.maxY - curveHeight - 8,
+            width: bounds.width - 20, height: curveHeight)
         let valid = samples.filter { $0.1 > 0.05 }
 
         guard valid.count >= 2, let newest = valid.last else {
@@ -112,9 +119,23 @@ final class HeartRatePipFrameRenderer {
                 .foregroundColor: UIColor(white: 0.5, alpha: 1)
             ]
             let size = hint.size(withAttributes: attrs)
-            hint.draw(at: CGPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), withAttributes: attrs)
+            hint.draw(at: CGPoint(x: bounds.midX - size.width / 2, y: plot.midY - size.height / 2), withAttributes: attrs)
             return
         }
+
+        // 网格线（按背景亮度选深浅墨色）
+        let brightness = max(0, min(100, s?.backgroundBrightness ?? 0)) / 100.0
+        let gridColor = brightness > 0.5
+            ? UIColor(white: 0, alpha: 0.06).cgColor
+            : UIColor(white: 1, alpha: 0.09).cgColor
+        ctx.setStrokeColor(gridColor)
+        ctx.setLineWidth(1)
+        for ratio in [0.25, 0.5, 0.75] {
+            let y = plot.minY + plot.height * CGFloat(ratio)
+            ctx.move(to: CGPoint(x: plot.minX, y: y))
+            ctx.addLine(to: CGPoint(x: plot.maxX, y: y))
+        }
+        ctx.strokePath()
 
         // 值域自适应：贴数据范围，span 下限 20 保证安静心率也有起伏
         let values = valid.map { $0.1 }
@@ -178,7 +199,7 @@ final class HeartRatePipFrameRenderer {
 
         // 折线描边
         color.setStroke()
-        line.lineWidth = 2
+        line.lineWidth = 2.5
         line.lineCapStyle = .round
         line.lineJoinStyle = .round
         line.stroke()
@@ -231,6 +252,13 @@ final class HeartRatePipFrameRenderer {
         let labelSize = "BPM".size(withAttributes: labelAttrs)
 
         let spacing = 8 * scale
+        // 高度钳制：纵向排列时数字+标签+间距超出绘制区则缩小数字字号（曲线样式上部区域较小）
+        if numberSize.height + labelSize.height + spacing > bounds.height {
+            let ratio = (bounds.height - labelSize.height - spacing) / numberSize.height
+            numberFont = roundedFont(ofSize: numberFont.pointSize * max(ratio, 0.3), weight: .bold)
+            numberAttrs = [.font: numberFont, .foregroundColor: numberColor]
+            numberSize = numberText.size(withAttributes: numberAttrs)
+        }
         let numberW = min(numberSize.width + 4, maxTextWidth)
         let labelW = min(labelSize.width + 4, maxTextWidth)
         let cx = bounds.midX

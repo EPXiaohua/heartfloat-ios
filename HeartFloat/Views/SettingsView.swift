@@ -153,19 +153,50 @@ struct PipSettingsView: View {
             Text("悬浮窗样式")
                 .font(.system(size: 16, weight: .bold))
 
-            Picker("样式", selection: $settings.pipStyle) {
-                Text("数字").tag(0)
-                Text("心率曲线").tag(1)
+            HStack(spacing: 12) {
+                styleCard(title: "数字", subtitle: "大字 BPM 卡片", icon: "textformat.123", selected: settings.pipStyle == 0)
+                    .onTapGesture {
+                        Haptics.light()
+                        settings.pipStyle = 0
+                    }
+                styleCard(title: "心率曲线", subtitle: "60 秒实时波形", icon: "waveform.path.ecg", selected: settings.pipStyle == 1)
+                    .onTapGesture {
+                        Haptics.light()
+                        settings.pipStyle = 1
+                    }
             }
-            .pickerStyle(SegmentedPickerStyle())
 
-            Text("「心率曲线」显示 60 秒滚动实时曲线与节拍光斑，BPM 数字按位置设置叠加在曲线上。")
+            Text("「心率曲线」底部显示 60 秒滚动波形与节拍光斑，BPM 数字按位置设置显示在上方。")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+    }
+
+    private func styleCard(title: String, subtitle: String, icon: String, selected: Bool) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundColor(selected ? recordingThemeColor : .secondary)
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(selected ? recordingThemeColor : .primary)
+            Text(subtitle)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(selected ? recordingThemeColor.opacity(0.12) : Color(.systemGray5).opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(selected ? recordingThemeColor : Color.clear, lineWidth: 1.5)
+        )
     }
 
     private var previewSection: some View {
@@ -175,9 +206,13 @@ struct PipSettingsView: View {
                 .foregroundColor(.secondary)
 
             ZStack {
-                RoundedRectangle(cornerRadius: 24)
+                RoundedRectangle(cornerRadius: 16)
                     .fill(Color(white: settings.backgroundBrightness / 100))
-                    .frame(height: 88)
+                    .frame(height: 130)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color(.systemGray4), lineWidth: 0.5)
+                    )
 
                 if settings.pipStyle == 1 {
                     PipCurvePreview(themeColor: settings.bpmNumberColor)
@@ -399,11 +434,23 @@ private struct PipCurvePreview: View {
         let lo = mid - span / 2
         let hi = mid + span / 2
 
-        // 时间轴右缘跟随最新采样点
+        // 时间轴右缘跟随最新采样点；曲线绘图区在底部 42%（与 PiP 实际布局一致）
         let base = newest.0
         let oldest = valid[0].0
         let viewport = min(60.0, max(base.timeIntervalSince(oldest), 5.0))
-        let plot = CGRect(x: 0, y: 4, width: size.width, height: size.height - 8)
+        let plot = CGRect(
+            x: 6, y: size.height - size.height * 0.42 - 4,
+            width: size.width - 12, height: size.height * 0.42)
+
+        // 网格线
+        let gridColor = Color.primary.opacity(0.06)
+        for ratio in [0.25, 0.5, 0.75] {
+            let y = plot.minY + plot.height * CGFloat(ratio)
+            var grid = Path()
+            grid.move(to: CGPoint(x: plot.minX, y: y))
+            grid.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(grid, with: .color(gridColor), lineWidth: 1)
+        }
 
         func yFor(_ v: Double) -> CGFloat {
             plot.maxY - CGFloat(min(max((v - lo) / max(hi - lo, 1), -0.2), 1.2)) * plot.height
@@ -434,7 +481,7 @@ private struct PipCurvePreview: View {
             Gradient(colors: [themeColor.opacity(0.30), themeColor.opacity(0.02)]),
             startPoint: CGPoint(x: 0, y: plot.minY),
             endPoint: CGPoint(x: 0, y: plot.maxY)))
-        context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+        context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
         if let last = valid.last, last.1 > 0.05 {
             context.fill(
