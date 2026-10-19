@@ -41,3 +41,13 @@ targets:
       path: HeartFloat/Resources/HeartFloat.entitlements
       properties:
         com.apple.developer.healthkit: false
+
+schemes:
+  HeartFloat:
+    build:
+      targets:
+        HeartFloat: all
+    run:
+      config: Debug
+    archive:
+      config: Release
