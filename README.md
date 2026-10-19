@@ -88,7 +88,7 @@ cd heartfloat-ios
 
 ## 许可证
 
-MIT License
+[GPL-3.0](LICENSE) © 2026 小花
 
 ## 作者
 
