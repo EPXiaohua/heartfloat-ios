@@ -414,9 +414,13 @@ private struct PipCurvePreview: View {
 
     /// 静态演示波形（不跟随真实心率）
     private static let demoValues: [Double] = {
-        (0..<60).map { i in
-            72 + sin(Double(i) / 9.0) * 5 + sin(Double(i) / 3.7) * 2
+        var values: [Double] = []
+        for i in 0..<60 {
+            let angle1 = Double(i) / 9.0
+            let angle2 = Double(i) / 3.7
+            values.append(72.0 + sin(angle1) * 5.0 + sin(angle2) * 2.0)
         }
+        return values
     }()
 
     var body: some View {
@@ -498,16 +502,21 @@ private struct PipCurvePreview: View {
         let phase = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: beatInterval) / beatInterval
         let pulse = 1 - phase
         let heartPoint = CGPoint(x: bar.minX + 10, y: bar.midY)
-        var heartContext = context
         let grow = 1 + 0.25 * CGFloat(pulse)
-        heartContext.translateBy(x: heartPoint.x, y: heartPoint.y)
-        heartContext.scaleBy(x: grow, y: grow)
-        heartContext.translateBy(x: -heartPoint.x, y: -heartPoint.y)
-        heartContext.draw(
-            Image(systemName: "heart.fill")
-                .font(.system(size: 13))
-                .foregroundColor(themeColor.opacity(0.55 + 0.45 * pulse)),
-            at: heartPoint)
+        let s = 6.5 * grow
+        let cx = heartPoint.x, cy = heartPoint.y
+        var heart = Path()
+        heart.move(to: CGPoint(x: cx, y: cy + s))
+        heart.addCurve(
+            to: CGPoint(x: cx, y: cy - 0.55 * s),
+            control1: CGPoint(x: cx + 1.15 * s, y: cy + 0.3 * s),
+            control2: CGPoint(x: cx + 0.95 * s, y: cy - 0.55 * s))
+        heart.addCurve(
+            to: CGPoint(x: cx, y: cy + s),
+            control1: CGPoint(x: cx - 0.95 * s, y: cy - 0.55 * s),
+            control2: CGPoint(x: cx - 1.15 * s, y: cy + 0.3 * s))
+        heart.closeSubpath()
+        context.fill(heart, with: .color(themeColor.opacity(0.55 + 0.45 * pulse)))
 
         context.draw(
             Text("88")
