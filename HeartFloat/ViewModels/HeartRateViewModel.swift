@@ -359,6 +359,11 @@ class HeartRateViewModel: NSObject, ObservableObject {
         let controller = AVPictureInPictureController(contentSource: source)
         controller.delegate = self
         controller.requiresLinearPlayback = true
+        // 私有样式：去掉播放/暂停/进度条等传输控件，只留系统关闭(X)/还原按钮
+        let styleSelector = NSSelectorFromString("setControlsStyle:")
+        if controller.responds(to: styleSelector) {
+            controller.setValue(1, forKey: "controlsStyle")
+        }
 
         pipSampleLayer = layer
         pipController = controller

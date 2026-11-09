@@ -14,6 +14,8 @@ class SettingsManager: ObservableObject {
     @AppStorage("backgroundBrightness") var backgroundBrightness: Double = 0
     /// 悬浮窗样式：0 = 数字卡片，1 = 心率曲线
     @AppStorage("pipStyle") var pipStyle: Int = 0
+    /// 数字样式是否显示 BPM 文本；关闭后仅居中显示心率数字
+    @AppStorage("pipShowBpmLabel") var pipShowBpmLabel: Bool = true
     @AppStorage("httpPushEnabled") var httpPushEnabled: Bool = false
     @AppStorage("httpPushPort") var httpPushPort: Int = 8080
     @AppStorage("wsPushEnabled") var wsPushEnabled: Bool = false

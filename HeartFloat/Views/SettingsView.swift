@@ -166,7 +166,7 @@ struct PipSettingsView: View {
                     }
             }
 
-            Text("「心率曲线」底部显示 60 秒滚动波形与节拍光斑，BPM 数字按位置设置显示在上方。")
+            Text("「心率曲线」为监护仪风格：顶部显示延迟与采样频率，中部实时波形两端淡入淡出，底部心脏图标随 BPM 轮动。")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
@@ -218,38 +218,40 @@ struct PipSettingsView: View {
                     PipCurvePreview(themeColor: settings.bpmNumberColor)
                 }
 
-                if settings.bpmPosition == 0 || settings.bpmPosition == 1 {
-                    // 纵向排列：BPM 在上 / 下
-                    VStack(spacing: 2) {
-                        if settings.bpmPosition == 0 {
-                            Text("BPM")
-                                .font(.system(size: settings.bpmLabelSize))
-                                .foregroundColor(settings.bpmLabelColor)
+                if settings.pipStyle == 0 {
+                    if settings.bpmPosition == 0 || settings.bpmPosition == 1 {
+                        // 纵向排列：BPM 在上 / 下
+                        VStack(spacing: 2) {
+                            if settings.pipShowBpmLabel && settings.bpmPosition == 0 {
+                                Text("BPM")
+                                    .font(.system(size: settings.bpmLabelSize))
+                                    .foregroundColor(settings.bpmLabelColor)
+                            }
+                            Text("88")
+                                .font(.system(size: min(settings.bpmNumberSize, 32), weight: .bold, design: .rounded))
+                                .foregroundColor(settings.bpmNumberColor)
+                            if settings.pipShowBpmLabel && settings.bpmPosition == 1 {
+                                Text("BPM")
+                                    .font(.system(size: settings.bpmLabelSize))
+                                    .foregroundColor(settings.bpmLabelColor)
+                            }
                         }
-                        Text("88")
-                            .font(.system(size: min(settings.bpmNumberSize, 32), weight: .bold, design: .rounded))
-                            .foregroundColor(settings.bpmNumberColor)
-                        if settings.bpmPosition == 1 {
-                            Text("BPM")
-                                .font(.system(size: settings.bpmLabelSize))
-                                .foregroundColor(settings.bpmLabelColor)
-                        }
-                    }
-                } else {
-                    // 横向排列：BPM 在左 / 右
-                    HStack(spacing: 4) {
-                        if settings.bpmPosition == 2 {
-                            Text("BPM")
-                                .font(.system(size: settings.bpmLabelSize))
-                                .foregroundColor(settings.bpmLabelColor)
-                        }
-                        Text("88")
-                            .font(.system(size: settings.bpmNumberSize, weight: .bold))
-                            .foregroundColor(settings.bpmNumberColor)
-                        if settings.bpmPosition == 3 {
-                            Text("BPM")
-                                .font(.system(size: settings.bpmLabelSize))
-                                .foregroundColor(settings.bpmLabelColor)
+                    } else {
+                        // 横向排列：BPM 在左 / 右
+                        HStack(spacing: 4) {
+                            if settings.pipShowBpmLabel && settings.bpmPosition == 2 {
+                                Text("BPM")
+                                    .font(.system(size: settings.bpmLabelSize))
+                                    .foregroundColor(settings.bpmLabelColor)
+                            }
+                            Text("88")
+                                .font(.system(size: min(settings.bpmNumberSize, 32), weight: .bold, design: .rounded))
+                                .foregroundColor(settings.bpmNumberColor)
+                            if settings.pipShowBpmLabel && settings.bpmPosition == 3 {
+                                Text("BPM")
+                                    .font(.system(size: settings.bpmLabelSize))
+                                    .foregroundColor(settings.bpmLabelColor)
+                            }
                         }
                     }
                 }
@@ -289,6 +291,8 @@ struct PipSettingsView: View {
             Text("BPM文字设置")
                 .font(.system(size: 16, weight: .bold))
 
+            Toggle("显示 BPM 文本", isOn: $settings.pipShowBpmLabel)
+
             HStack {
                 Text("文字大小")
                     .foregroundColor(.secondary)
@@ -304,6 +308,10 @@ struct PipSettingsView: View {
                 ColorPicker("", selection: $settings.bpmLabelColor)
                     .labelsHidden()
             }
+
+            Text("关闭后悬浮窗（数字样式）只居中显示心率数字。")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
         }
         .padding()
         .settingsCardBackground()
@@ -398,11 +406,18 @@ struct PipSettingsView: View {
     }
 }
 
-// MARK: - 悬浮窗曲线预览（简化版主页实时曲线，用于样式预览）
+// MARK: - 悬浮窗曲线预览（监护仪风格静态演示，布局与 PiP 实际渲染一致）
 
 private struct PipCurvePreview: View {
-    @EnvironmentObject var viewModel: HeartRateViewModel
+    @EnvironmentObject var settings: SettingsManager
     let themeColor: Color
+
+    /// 静态演示波形（不跟随真实心率）
+    private static let demoValues: [Double] = {
+        (0..<60).map { i in
+            72 + sin(Double(i) / 9.0) * 5 + sin(Double(i) / 3.7) * 2
+        }
+    }()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { timeline in
@@ -414,19 +429,35 @@ private struct PipCurvePreview: View {
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, now: Date) {
-        let samples = viewModel.heartRateSamples.filter { now.timeIntervalSince($0.0) <= 61 }
-        let valid = samples.filter { $0.1 > 0.05 }
+        let statusHeight = size.height * 0.14
+        let bottomHeight = size.height * 0.20
+        let plot = CGRect(
+            x: 10, y: statusHeight + 4,
+            width: size.width - 20,
+            height: size.height - statusHeight - bottomHeight - 8)
+        let brightness = max(0, min(100, settings.backgroundBrightness)) / 100.0
+        let bg = Color(white: brightness)
+        let ink = brightness > 0.5 ? Color.black.opacity(0.45) : Color.white.opacity(0.45)
 
-        guard valid.count >= 2, let newest = valid.last else {
-            let hint = viewModel.connectionState == .connected ? "正在采集心率数据..." : "连接手环后显示心率曲线"
-            context.draw(
-                Text(hint).font(.system(size: 11)).foregroundColor(.secondary),
-                at: CGPoint(x: size.width / 2, y: size.height / 2))
-            return
+        // 顶部状态条
+        context.draw(
+            Text("延迟 320ms").font(.system(size: 8, weight: .medium)).foregroundColor(ink),
+            at: CGPoint(x: plot.minX + 18, y: 8), anchor: .leading)
+        context.draw(
+            Text("1.0 Hz").font(.system(size: 8, weight: .medium)).foregroundColor(ink),
+            at: CGPoint(x: plot.maxX - 18, y: 8), anchor: .trailing)
+
+        // 网格线
+        for ratio in [0.25, 0.5, 0.75] {
+            let y = plot.minY + plot.height * CGFloat(ratio)
+            var grid = Path()
+            grid.move(to: CGPoint(x: plot.minX, y: y))
+            grid.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(grid, with: .color(Color.primary.opacity(0.06)), lineWidth: 1)
         }
 
         // 值域自适应（与 PiP 渲染器一致：span 下限 20）
-        let values = valid.map { $0.1 }
+        let values = Self.demoValues
         let vmin = values.min() ?? 60
         let vmax = values.max() ?? 100
         let mid = (vmin + vmax) / 2
@@ -434,60 +465,55 @@ private struct PipCurvePreview: View {
         let lo = mid - span / 2
         let hi = mid + span / 2
 
-        // 时间轴右缘跟随最新采样点；曲线绘图区在底部 42%（与 PiP 实际布局一致）
-        let base = newest.0
-        let oldest = valid[0].0
-        let viewport = min(60.0, max(base.timeIntervalSince(oldest), 5.0))
-        let plot = CGRect(
-            x: 6, y: size.height - size.height * 0.42 - 4,
-            width: size.width - 12, height: size.height * 0.42)
-
-        // 网格线
-        let gridColor = Color.primary.opacity(0.06)
-        for ratio in [0.25, 0.5, 0.75] {
-            let y = plot.minY + plot.height * CGFloat(ratio)
-            var grid = Path()
-            grid.move(to: CGPoint(x: plot.minX, y: y))
-            grid.addLine(to: CGPoint(x: plot.maxX, y: y))
-            context.stroke(grid, with: .color(gridColor), lineWidth: 1)
-        }
-
         func yFor(_ v: Double) -> CGFloat {
             plot.maxY - CGFloat(min(max((v - lo) / max(hi - lo, 1), -0.2), 1.2)) * plot.height
         }
-        func xFor(_ t: Date) -> CGFloat {
-            plot.maxX - CGFloat(base.timeIntervalSince(t) / viewport) * plot.width
-        }
 
-        context.clip(to: Path(plot))
-
+        // 监护风格折线（静态铺满绘图区，演示值域在区间内无需剪裁）
         var line = Path()
-        var started = false
-        for (t, v) in valid {
-            let p = CGPoint(x: xFor(t), y: yFor(v))
-            if started {
-                line.addLine(to: p)
-            } else {
-                line.move(to: p)
-                started = true
-            }
+        for (i, v) in values.enumerated() {
+            let p = CGPoint(x: plot.minX + plot.width * CGFloat(i) / CGFloat(values.count - 1), y: yFor(v))
+            if i == 0 { line.move(to: p) } else { line.addLine(to: p) }
         }
-
-        var fill = line
-        fill.addLine(to: CGPoint(x: plot.maxX, y: plot.maxY))
-        fill.addLine(to: CGPoint(x: plot.minX, y: plot.maxY))
-        fill.closeSubpath()
-        context.fill(fill, with: .linearGradient(
-            Gradient(colors: [themeColor.opacity(0.30), themeColor.opacity(0.02)]),
-            startPoint: CGPoint(x: 0, y: plot.minY),
-            endPoint: CGPoint(x: 0, y: plot.maxY)))
         context.stroke(line, with: .color(themeColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
-        if let last = valid.last, last.1 > 0.05 {
-            context.fill(
-                Path(ellipseIn: CGRect(x: plot.maxX - 3, y: yFor(last.1) - 3, width: 6, height: 6)),
-                with: .color(themeColor))
-        }
+        // 两端淡入淡出
+        let fade = plot.width * 0.16
+        context.fill(
+            Path(CGRect(x: plot.minX, y: plot.minY - 2, width: fade, height: plot.height + 4)),
+            with: .linearGradient(
+                Gradient(colors: [bg, bg.opacity(0)]),
+                startPoint: CGPoint(x: plot.minX, y: 0),
+                endPoint: CGPoint(x: plot.minX + fade, y: 0)))
+        context.fill(
+            Path(CGRect(x: plot.maxX - fade, y: plot.minY - 2, width: fade, height: plot.height + 4)),
+            with: .linearGradient(
+                Gradient(colors: [bg.opacity(0), bg]),
+                startPoint: CGPoint(x: plot.maxX - fade, y: 0),
+                endPoint: CGPoint(x: plot.maxX, y: 0)))
+
+        // 底栏：心脏图标随 BPM 轮动（演示 72bpm）+ 心率数字
+        let bar = CGRect(x: 10, y: size.height - bottomHeight - 2, width: size.width - 20, height: bottomHeight)
+        let beatInterval = 60.0 / 72.0
+        let phase = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: beatInterval) / beatInterval
+        let pulse = 1 - phase
+        let heartPoint = CGPoint(x: bar.minX + 10, y: bar.midY)
+        var heartContext = context
+        let grow = 1 + 0.25 * CGFloat(pulse)
+        heartContext.translateBy(x: heartPoint.x, y: heartPoint.y)
+        heartContext.scaleBy(x: grow, y: grow)
+        heartContext.translateBy(x: -heartPoint.x, y: -heartPoint.y)
+        heartContext.draw(
+            Image(systemName: "heart.fill")
+                .font(.system(size: 13))
+                .foregroundColor(themeColor.opacity(0.55 + 0.45 * pulse)),
+            at: heartPoint)
+
+        context.draw(
+            Text("88")
+                .font(.system(size: bottomHeight * 0.62, weight: .bold, design: .rounded))
+                .foregroundColor(themeColor),
+            at: CGPoint(x: bar.maxX - 12, y: bar.midY), anchor: .trailing)
     }
 }
 
